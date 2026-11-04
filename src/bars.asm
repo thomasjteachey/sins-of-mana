@@ -1115,21 +1115,30 @@ HudBlock:                    ; the next block in turn
 	LDA $13
 	CMP.l !HudSig+4,X
 	BNE .changed
-	LDA $01                  ; unchanged: just check the game left our first cell alone
-	ASL
-	ASL
+	LDA $01                  ; unchanged: just check the game left our cells alone
+	ASL                      ; (every cell of the first row: the game's HP text can
+	ASL                      ; blank the one next to it)
 	CLC
 	ADC $01
 	ASL
 	TAX                      ; block * 20 (BlockRows)
+	LDA.l BlockRows+2,X
+	STA $17                  ; cells
 	LDA.l BlockRows+4,X
 	STA $15
 	LDA.l BlockRows,X
-	TAX
+	STA $19
+-	LDX $19
 	LDA.l !Shadow,X
 	LDX $15
 	CMP.l !HudLast,X
 	BNE .changed
+	INC $15
+	INC $15
+	INC $19
+	INC $19
+	DEC $17
+	BNE -
 	RTS
 .changed
 	LDA $01                  ; (block * 6 again)
@@ -1699,8 +1708,8 @@ BlockHpCell:                 ; first cell of each block's HP row ("cur/max" HP)
 BlockRows:                   ; per block, 2 rows: first cell, cells, !HudLast offset, right-aligned, upload bit
 	dw (23*32+22)*2, 9, $00, 0, 2    ; bottom block: right of it, rows 23-24
 	dw (24*32+22)*2, 9, $12, 0, 2
-	dw (1*32+17)*2, 5, $24, 1, 1     ; top right block: left of it, rows 1-2
-	dw (2*32+17)*2, 5, $2E, 1, 1
+	dw (1*32+16)*2, 5, $24, 1, 1     ; top right block: left of it, rows 1-2 (column 21
+	dw (2*32+16)*2, 5, $2E, 1, 1     ; is the game's HP field: it blanks our icon there)
 	dw (1*32+11)*2, 5, $38, 0, 1     ; top left block: right of it, rows 1-2
 	dw (2*32+11)*2, 5, $42, 0, 1
 TagDefs:                     ; record offset, field mask, raised, lowered (icon order)
