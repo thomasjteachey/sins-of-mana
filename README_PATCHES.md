@@ -24,8 +24,9 @@ Pick any mix and apply in any order. Only one combination has a requirement:
 | `sinofmana_levelup_info.ips` | At the level-up stat choice, a panel shows what the highlighted stat does, the next spell it unlocks in the current class, and the character's Lv60 capstone for it. |
 | `sinofmana_shop_descriptions.ips` | The equipment descriptions in a shop's buy / sell ring, in the same top panel. |
 | `sinofmana_enemy_weaknesses.ips` | While you pick a target, the lines under the target bar list the enemy's weak and resisted elements (weak / drain / repel / void / half), read from the game's own data for that enemy, bosses included. |
+| `sinofmana_spell_details.ips` | While the ring menu shows a spell, the lines under its bar show its element and cast time (from the game's data), what it does and its possible upgrades (from the mod's spell sheet). |
 
-The eight bar / panel patches share one engine: each carries all of it plus its own
+The nine bar / panel patches share one engine: each carries all of it plus its own
 on/off switch, so they never conflict with each other.
 
 ## Files

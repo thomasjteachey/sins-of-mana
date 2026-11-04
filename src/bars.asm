@@ -93,6 +93,7 @@ FeatHudIcons  = $CBF4F8
 FeatLevelInfo = $CBF4FA
 FeatShopInfo  = $CBF4FC
 FeatWeakness  = $CBF4FE
+FeatSpellInfo = $CBFFFE      ; ($CB:F4F0-F4FF is full; $CB:FFFC-FFFF is blank too)
 
 !Ram      = $7E2800
 !CastBook = !Ram+$000        ; 16 entity slots x (wait timer, steps << 12 | bar length; $FFFF, tick it ran out)
@@ -130,10 +131,11 @@ FeatWeakness  = $CBF4FE
 !ShopDesc  = !Ram+$0F0       ; description (bank $53) of the last item name printed (main.asm)
 !ShopStamp = !Ram+$0F2       ; !Ticks when it was noted
 !PanelVal  = !Ram+$0F4       ; the highlighted stat as the window shows it (with the +1)
-!WeakRec  = !Ram+$0F6        ; target picker up: record whose name it printed (0 = not up)
-!WeakDP   = !Ram+$0F8        ; direct page of the text task that printed it
-!WeakX    = !Ram+$0FC        ; where that text ended (D+$28) once printed ($FFFF: not noted yet)
-!WeakOn   = !Ram+$0FA        ; record whose elements are listed under the target bar (0 = none)
+!WeakRec  = !Ram+$0F6        ; what the bar shows: enemy record ($1000+), spell id * 17, 0 = neither
+!SpellPend = !Ram+$0F8       ; spell id * 17 the ring just looked up (for the next bar line), 0 = none
+!SpellTime = !Ram+$0FC       ; !Ticks then
+!WeakOn   = !Ram+$0FA        ; what rows 8-15 list now (as !WeakRec, 0 = nothing)
+!WeakRows = !Ram+$0FE        ; rows (from 8) the last list used
 !RowBusy  = !Ram+$0C0        ; byte per BG3 row: nonzero = the game shows text there
 !TableA   = !Ram+$100        ; HDMA tables (<= 100 bytes each)
 !TableB   = !Ram+$180
@@ -183,6 +185,15 @@ org $C46A79                  ; text op that prints a monster's name (the target 
 	assert read4($C46A79) == $7F0090BF && read1($C46A7D) == $0A
 	JSL WeakName              ; was LDA $7F0090,X : ASL
 	NOP
+
+org $C46C5E                  ; text op $03: a new line (the target / ring bar starts each text with it)
+	assert read3($C46C5E) == $0000A0 && read2($C46C61) == $2884
+	JSL WeakLine             ; was LDY #$0000 : STY $28
+	NOP
+
+org $D0ED21                  ; script op: a spell's info for the ring bar (X = spell id * 17)
+	assert read4($D0ED21) == $402F2022
+	JSL SpellNote            ; was JSL $402F20 (the mod's; SpellNote goes on to it)
 
 org $C45EF5                  ; end of the HUD flicker step, after it copied this step's colours
 	JSL PulseFix             ; was LDA $7F0330 : ORA #$0004 : STA $7F0330 : RTS
@@ -240,11 +251,15 @@ Bars:
 	JSL LevelPanel
 	BCC +
 	JMP .uploads
-+	JSL WeakPanel            ; enemy weaknesses under the target bar
-	BCC +                    ; (carry: upload BG3 rows 8-11)
++	JSL WeakPanel            ; enemy weaknesses / spell details under the bar
+	BCC +                    ; (carry: upload BG3 rows 8-15)
 	LDA.w #8*64
 	JSR QueueHudRows
 	LDA.w #10*64
+	JSR QueueHudRows
+	LDA.w #12*64
+	JSR QueueHudRows
+	LDA.w #14*64
 	JSR QueueHudRows
 +	LDA.l FeatRevenge        ; no bar feature on (e.g. only the HUD icons): no bars
 	AND.l FeatMarkers
@@ -3321,32 +3336,58 @@ LvLastLine:                  ; = EmitLastLine (that one is in bank $CB)
 incsrc "../build/levelinfo.asm"
 
 
-; Enemy weaknesses. While the player picks a target, rows 8-11 under the target bar
-; list the targeted enemy's weak and resisted elements, read from its own record
-; (+$D1 repel, +$D2 drain, +$D3 void, +$D4 half, +$D5 weak: a bit per element, bit 0-7 =
-; earth, air, water, fire, dark, holy, moon, leaf; words: tools/make_weakinfo.py).
-; WeakName runs in the text op that prints a monster's name, which the target bar
-; uses for each enemy the cursor lands on: it notes the record and the text task.
-; The first frame after, WeakWhich notes where the bar's text ended (the task's D+$28:
-; a name ends short of the bar's end, the ring's spell line at $1E). The list stays
-; while the bar still ends there (no other text: spell name, "All enemies", an ally)
-; and the ring menu's window is up ($7F:0032 nonzero; it also blinks off for "All
-; enemies"). The menu script's own variables move around between fights, so no use.
-WeakName:                    ; X = the monster's record, D = the text task
+; Info under the bar at the top (BG3 rows 8-15), two features on one panel:
+;  * Enemy weaknesses (FeatWeakness): while the player picks a target, the targeted
+;    enemy's weak and resisted elements, read from its own record (+$D1 repel, +$D2
+;    drain, +$D3 void, +$D4 half, +$D5 weak: a bit per element, bit 0-7 = earth, air,
+;    water, fire, dark, holy, moon, leaf).
+;  * Spell details (FeatSpellInfo): while the ring shows a spell, its element and cast
+;    time (the game's spell table $D1:9936 + id*17: +1 cast time, +3 element bits),
+;    then what it does and its possible upgrades (texts: tools/make_weakinfo.py).
+; What the bar shows: each of its texts starts with text op $03 (new line, WeakLine).
+; The ring looks the spell up (SpellNote) just before its line; the target bar prints
+; the monster's name (WeakName) just after it. So WeakLine takes a spell noted in the
+; last few frames, else nothing, and WeakName sets the enemy. The ring menu's own
+; variables move around between saves, so they are not used. The list goes once the
+; menu's window HDMA ($7F:0032) is off: menu closed (it also blinks for "All enemies").
+WeakName:                    ; X = the monster's record
 	TXA
 	STA.l !WeakRec
-	TDC
-	STA.l !WeakDP
-	LDA.w #$FFFF
-	STA.l !WeakX
 	LDA.l $7F0090,X          ; the replaced code
 	ASL
 	RTL
 
-; Called from Bars every frame (16-bit A/X/Y, DB = $7F, D = Bars' locals). Carry set: rows 8-11 changed.
+WeakLine:                    ; D = the text task
+	PHA
+	LDY.w #$0000
+	STY $28                  ; the replaced code
+	LDA.l !SpellPend
+	BEQ +
+	LDA.l !Ticks
+	SEC
+	SBC.l !SpellTime
+	CMP.w #$0008
+	BCS +                    ; noted too long ago: not for this line
+	LDA.l !SpellPend
+	BRA ++
++	LDA.w #$0000
+++	STA.l !WeakRec
+	LDA.w #$0000
+	STA.l !SpellPend
+	PLA
+	RTL
+
+SpellNote:                   ; X = spell id * 17
+	PHA
+	TXA
+	STA.l !SpellPend
+	LDA.l !Ticks
+	STA.l !SpellTime
+	PLA
+	JML $402F20              ; the mod's routine returns to the script op
+
+; Called from Bars every frame (16-bit A/X/Y, DB = $7F, D = Bars' locals). Carry set: rows 8-15 changed.
 WeakPanel:
-	LDA.l FeatWeakness
-	BMI .no
 	JSR WeakWhich
 	CMP.l !WeakOn
 	BNE .draw
@@ -3365,24 +3406,22 @@ WeakPanel:
 	CLC
 	RTL
 
-; A = record of the enemy to list, 0 = none.
+; A = what to list (as !WeakRec), 0 = nothing.
 WeakWhich:
 	LDA.l !WeakRec
 	BEQ .none
-	LDA.l $7F0032            ; the ring menu's window HDMA
+	LDA.l $7F0032            ; the menu's window HDMA
 	AND.w #$00FF
 	BEQ .stop                ; gone: the menu closed (or "All enemies" blinks)
-	LDA.l !WeakDP
-	TAX
-	LDA.l $7E0028,X          ; where the bar's text ends now
-	CMP.l !WeakX
-	BEQ .show
-	LDA.l !WeakX
-	CMP.w #$FFFF
-	BNE .stop                ; the bar shows some other text
-	LDA.l $7E0028,X          ; the name's line gets printed a frame or two later
-	BEQ .show                ; (0 until then): note where it ends once it is
-	STA.l !WeakX
+	LDA.l !WeakRec
+	CMP.w #$1000
+	BCC .spell
+	LDA.l FeatWeakness
+	BMI .none
+	BRA .show
+.spell
+	LDA.l FeatSpellInfo
+	BMI .none
 .show
 	LDA.l !WeakRec
 	RTS
@@ -3393,27 +3432,36 @@ WeakWhich:
 	LDA.w #$0000
 	RTS
 
-; Blank BG3 rows 8-11, then list the elements of record A there (A = 0: blank only).
-; "Weak" fills row 8 ("none" if empty), the resistances start on row 9 and wrap at 30
-; cells; 6+ elements show as "all but ...". Locals: $01 cell offset, $03 row offset,
-; $05 palette bits, $07 cells used in the row, $09 mask, $0B list mode, $0D items left,
-; $0F segment length, $11 category, $13 record, $15 out of rows, $17 start a new row,
-; $19 bit, $1B items written, $1D name / mask, $21 string length.
+; Blank the rows the last list used, then list A there: an enemy record ($1000+) or a
+; spell id * 17 (A = 0: blank only). Lines wrap at 30 cells, rows 8-15. Locals: $01 cell
+; offset, $03 row offset, $05 palette bits, $07 cells used in the row, $09 mask, $0B list
+; mode, $0D items left, $0F segment length, $11 category, $13 what, $15 out of rows,
+; $17 start a new row, $19 bit, $1B items written, $1D name / mask, $21 string length,
+; $27 spell id, $29 / $2B number printing.
 WeakDraw:
 	PHB
 	PHK
 	PLB                      ; DB = this bank (the words)
 	STA $13
+	LDA.l !WeakRows
+	CMP.w #$0009
+	BCC +
+	LDA.w #$0008
++	XBA
+	LSR
+	LSR
+	CLC
+	ADC.w #8*64
+	STA $0F                  ; end of the rows to blank
 	LDX.w #8*64
 	LDA.w #$00FF
--	STA.l !Shadow,X
+-	CPX $0F
+	BCS +
+	STA.l !Shadow,X
 	INX
 	INX
-	CPX.w #12*64
-	BNE -
-	LDA $13
-	BEQ .done
-	LDA.w #8*64
+	BRA -
++	LDA.w #8*64              ; row 8, column 1
 	STA $03
 	INC
 	INC
@@ -3421,6 +3469,35 @@ WeakDraw:
 	STZ $07
 	STZ $15
 	STZ $17
+	LDA $13
+	BEQ .rows
+	CMP.w #$1000
+	BCS +
+	JSR SpellLines
+	BRA .rows
++	JSR EnemyLines
+.rows
+	LDA $13                  ; rows used: up to the current one
+	BEQ +
+	LDA $03
+	SEC
+	SBC.w #8*64
+	LSR
+	LSR
+	LSR
+	LSR
+	LSR
+	LSR
+	INC
+	CMP.w #$0009
+	BCC +
+	LDA.w #$0008
++	STA.l !WeakRows
+	PLB
+	RTS
+
+; "Weak" on row 8 ("none" if empty), then the resistances from row 9.
+EnemyLines:
 	STZ $11                  ; Weak, always
 	LDX $13
 	LDA.l $7F00D5,X
@@ -3447,8 +3524,6 @@ WeakDraw:
 	LDA.w #$0004
 	LDY.w #$00D4             ; Half
 	JSR WeakCat
-.done
-	PLB
 	RTS
 
 ; A = category (Drain: 1 is set by the caller), Y = record offset of its mask.
@@ -3469,6 +3544,124 @@ WeakCat:
 	BEQ +
 	JSR WeakSeg
 +	RTS
+
+; "Element: x  Cast: n" on row 8, then the spell's text from row 9.
+SpellLines:
+	LDA $13                  ; spell id = $13 / 17
+	LDY.w #$0000
+-	CMP.w #17
+	BCC +
+	SBC.w #17
+	INY
+	BRA -
++	STY $27
+	LDA.w #$0005             ; "Element: "
+	STA $11
+	LDX $13
+	LDA.l $D19939,X          ; element bits
+	AND.w #$00FF
+	CMP.w #$00C0             ; (the physical ones)
+	BNE +
+	LDA.w #$2400
+	STA $05
+	LDY.w #WeakLabels+(5*16)
+	JSR WeakStr
+	LDA.w #$3000
+	STA $05
+	LDY.w #WeakPhys
+	JSR WeakStr
+	BRA .cast
++	JSR WeakSeg
+.cast
+	LDA $07                  ; "  Cast: nnn" fits on this row?
+	CLC
+	ADC.w #13
+	CMP.w #31
+	BCC +
+	JSR WeakNewRow
+	BRA ++
++	LDA.w #$00FF
+	JSR WeakPut
+	LDA.w #$00FF
+	JSR WeakPut
+++	LDA.w #$2400
+	STA $05
+	LDY.w #WeakCast
+	JSR WeakStr
+	LDA.w #$3000
+	STA $05
+	LDX $13
+	LDA.l $D19937,X          ; cast time
+	AND.w #$00FF
+	JSR WeakNum
+	LDA $27
+	CMP.w #(SpellText-SpellPtr)/2
+	BCS .rts                 ; no text for it
+	ASL
+	TAX
+	LDA.w SpellPtr,X
+	BEQ .rts
+	PHA
+	JSR WeakNewRow
+	PLY
+	JSR WeakStream
+.rts
+	RTS
+
+; Y = stream in this bank: tiles, $00 end, $01 next line, $02 green, $03 white.
+WeakStream:
+-	LDA $0000,Y
+	INY
+	AND.w #$00FF
+	BEQ .rts
+	CMP.w #$0004
+	BCS .tile
+	CMP.w #$0001
+	BNE +
+	JSR WeakNewRow
+	BRA -
++	CMP.w #$0002
+	BEQ +
+	LDA.w #$3000
+	BRA ++
++	LDA.w #$2400
+++	STA $05
+	BRA -
+.tile
+	JSR WeakPut
+	BRA -
+.rts
+	RTS
+
+; A = 0-999 in decimal, no leading zeros.
+WeakNum:
+	STZ $2B
+	LDX.w #100
+	JSR .digit
+	LDX.w #10
+	JSR .digit
+	INC $2B
+	LDX.w #1
+.digit                       ; A = value, X = place: put A / X (unless a leading 0), A = A mod X
+	STX $29
+	LDY.w #$0000
+-	CMP $29
+	BCC +
+	SBC $29
+	INY
+	BRA -
++	PHA
+	TYA
+	ORA $2B
+	BEQ +
+	LDA.w #$0001
+	STA $2B
+	TYA
+	CLC
+	ADC.w #$0080             ; digit tiles
+	JSR WeakPut
++	PLA
+	RTS
 
 ; One "Label: items" segment: A = mask, $11 = category.
 WeakSeg:
@@ -3527,6 +3720,7 @@ WeakSeg:
 	LDA.w #$2400             ; label green (palette 1)
 	STA $05
 	LDA $11
+	ASL
 	ASL
 	ASL
 	ASL
@@ -3602,6 +3796,7 @@ WeakSegLen:
 	ASL
 	ASL
 	ASL
+	ASL
 	TAY
 	LDA WeakLabels,Y
 	AND.w #$00FF
@@ -3650,7 +3845,7 @@ WeakNewRow:
 	CLC
 	ADC.w #64
 	STA $03
-	CMP.w #12*64
+	CMP.w #16*64
 	BCC +
 	INC $15                  ; out of rows: write no more
 +	LDA $03

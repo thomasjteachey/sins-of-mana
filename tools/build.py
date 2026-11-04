@@ -31,6 +31,7 @@ BAR_FEATURES = [
     ('FeatLevelInfo', 'sinofmana_levelup_info.ips'),
     ('FeatShopInfo', 'sinofmana_shop_descriptions.ips'),
     ('FeatWeakness', 'sinofmana_enemy_weaknesses.ips'),
+    ('FeatSpellInfo', 'sinofmana_spell_details.ips'),
 ]
 ALL_PATCHES = (['sinofmana_equip_descriptions.ips', 'no_popup_messages_fixed.ips', 'sinofmana_fast_menus.ips']
                + [ips for _, ips in BAR_FEATURES])

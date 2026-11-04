@@ -10,7 +10,7 @@ Every ROM range the add-on patches write, on top of Sin of Mana 2.060 (ExHiROM;
   "written" is the part the current build fills.
 - "Written" counts only bytes that differ from 2.060 (an IPS skips the rest).
 
-The eight bar / panel patches (`sinofmana_revenge_bar.ips`, `sinofmana_enemy_buff_markers.ips`, `sinofmana_party_cast_bar.ips`, `sinofmana_enemy_cast_bar.ips`, `sinofmana_party_buff_icons.ips`, `sinofmana_levelup_info.ips`, `sinofmana_shop_descriptions.ips`, `sinofmana_enemy_weaknesses.ips`) carry the same engine, so they write the same bytes except their own
+The eight bar / panel patches (`sinofmana_revenge_bar.ips`, `sinofmana_enemy_buff_markers.ips`, `sinofmana_party_cast_bar.ips`, `sinofmana_enemy_cast_bar.ips`, `sinofmana_party_buff_icons.ips`, `sinofmana_levelup_info.ips`, `sinofmana_shop_descriptions.ips`, `sinofmana_enemy_weaknesses.ips`, `sinofmana_spell_details.ips`) carry the same engine, so they write the same bytes except their own
 2-byte switch. Any mix of the patches applies cleanly: `tools/build.py` checks that no two of them disagree on a byte.
 
 ## Bar / panel engine (all eight feature patches)
@@ -20,12 +20,15 @@ The eight bar / panel patches (`sinofmana_revenge_bar.ips`, `sinofmana_enemy_buf
 | `$C0:22BC-22C2` | hook | `$C0:22BC-22C2` (7 bytes) | - | NMI, where the game re-enables HDMA after its uploads (`LDA $0032 : STA $420C`) -> `JSL NmiHdma`: points HDMA channel 1 at the bar table |
 | `$C4:5EF5-5EF9` | hook | `$C4:5EF5-5EF9` (5 bytes) | - | end of the HUD flicker step (`LDA $7F0330 : ORA #4 : STA $7F0330 : RTS`) -> `JSL PulseFix` |
 | `$C4:6A79-6A7D` | hook | `$C4:6A79-6A7D` (5 bytes) | - | text op that prints a monster's name (target bar), `LDA $7F0090,X : ASL` -> `JSL WeakName` |
+| `$C4:6C5E-6C62` | hook | `$C4:6C5E-6C62` (5 bytes) | - | text op $03 (new line; each target / ring bar text starts with it), `LDY #0 : STY $28` -> `JSL WeakLine` |
+| `$D0:ED21-ED24` | hook | `$D0:ED22-ED24` (3 bytes) | - | script op that looks up a spell for the ring bar, `JSL $402F20` (the mod's) -> `JSL SpellNote`, which goes on to it |
+| `$CB:FFFE-FFFF` | free | `$CB:FFFE-FFFF` (2 bytes) | yes ($FF) | one more feature switch (`FeatSpellInfo`): the block above is full |
 | `$D0:FB12-FB15` | hook | `$D0:FB13-FB15` (3 bytes) | - | cast start, `JSL $C40018` -> `JSL CastStart` (notes the cast length) |
 | `$FD:6E24-6E28` | hook | `$FD:6E24-6E28` (5 bytes) | - | sprite builder in the main loop, `JSR $6E9B : SEP #$20` -> `JSL Bars` (runs the engine once per frame) |
-| `$CB:E400-F4EF` | free | `$CB:E400-F3B6` (3925 bytes) | yes ($FF) | engine code: bars, HUD buff icons, NMI part (FastROM) |
+| `$CB:E400-F4EF` | free | `$CB:E400-F3C2` (3940 bytes) | yes ($FF) | engine code: bars, HUD buff icons, NMI part (FastROM) |
 | `$CB:F4F0-F4FF` | free | `$CB:F4F0-F4FF` (16 bytes) | yes ($FF) | feature switches, one word each: `$FFFF` off, `$0000` on (table below) |
 | `$56:A000-FFFF` | free | `$56:A000-A239` (503 bytes) | yes ($00) | engine code: `CastStart`, `PulseFix`, cast timing |
-| `$58:0000-FFFF` | free | `$58:0000-1C46` (6723 bytes) | yes ($00) | info panels (level-up, shop, enemy weaknesses): code and texts |
+| `$58:0000-FFFF` | free | `$58:0000-34AE` (12664 bytes) | yes ($00) | info panels (level-up, shop, enemy weaknesses, spell details): code and texts |
 
 Feature switches:
 
@@ -39,6 +42,7 @@ Feature switches:
 | `$CB:F4FA` | `sinofmana_levelup_info.ips` (`FeatLevelInfo`) |
 | `$CB:F4FC` | `sinofmana_shop_descriptions.ips` (`FeatShopInfo`) |
 | `$CB:F4FE` | `sinofmana_enemy_weaknesses.ips` (`FeatWeakness`) |
+| `$CB:FFFE` | `sinofmana_spell_details.ips` (`FeatSpellInfo`) |
 
 ## `sinofmana_equip_descriptions.ips`
 
@@ -89,14 +93,15 @@ Feature switches:
 | `sinofmana_equip_descriptions.ips` | 10495 |
 | `no_popup_messages_fixed.ips` | 33 |
 | `sinofmana_fast_menus.ips` | 2592 |
-| `sinofmana_revenge_bar.ips` | 11178 |
-| `sinofmana_enemy_buff_markers.ips` | 11178 |
-| `sinofmana_party_cast_bar.ips` | 11178 |
-| `sinofmana_enemy_cast_bar.ips` | 11178 |
-| `sinofmana_party_buff_icons.ips` | 11178 |
-| `sinofmana_levelup_info.ips` | 11178 |
-| `sinofmana_shop_descriptions.ips` | 11178 |
-| `sinofmana_enemy_weaknesses.ips` | 11178 |
+| `sinofmana_revenge_bar.ips` | 17142 |
+| `sinofmana_enemy_buff_markers.ips` | 17142 |
+| `sinofmana_party_cast_bar.ips` | 17142 |
+| `sinofmana_enemy_cast_bar.ips` | 17142 |
+| `sinofmana_party_buff_icons.ips` | 17142 |
+| `sinofmana_levelup_info.ips` | 17142 |
+| `sinofmana_shop_descriptions.ips` | 17142 |
+| `sinofmana_enemy_weaknesses.ips` | 17142 |
+| `sinofmana_spell_details.ips` | 17142 |
 
 ## RAM
 
