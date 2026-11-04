@@ -182,6 +182,9 @@ Soak test so far (tournament fight, Duran with poked spells; `tools/spam.py STAT
   - 60 cycles leaving mid-action: settled cycles (4 entities) all at heap 80-81 pages, 8 owners, 10 sprite objects, 8-10 timers, ~55 free DMA jobs.
   - 63 cycles with 92 kills at varied timing (31 settled samples): heap 80-83, objects 9-10, timers 4-10, free DMA 52-58. No growth. (Samples with 6 entities were taken mid-transition and are left out.)
   - Not covered yet: the party's own casts cut off by leaving, bosses, summons, techs, and much longer runs.
+- User (2026-11-04): it shows after leaving the game running a long time without a reset; tell-tale sign: damage numbers that stay on screen across screen changes. Counters that tick by themselves (idle in the statue room, dumps 600 / 1200 frames apart): `$7F:00C6` +1 per frame (the clock the game's timers use; wraps every ~18 min), `$7E:0904` +1 per 2 frames (wraps every ~36 min), `$7E:0EBA` ~+1 per 4 s (~3 days), `$7E:01EB` / `$01F0` / `$01F4` ~+1 per minute. `$7F:008C` is the running process's ID (heap owners stay the same small set: 1, 4, 5, 6, 13, 15, 16, 17, 77), not a counter.
+  - 100 walk-in / walk-out cycles (`leaktest.py statue 5 20`, ~68000 frames) across a natural wrap of `$7F:00C6` (`$FF7D` -> `$0225` between cycles 61 and 62): statue-room screenshots after every cycle (`lk_<n>`) show no leftover numbers; dumps at the true cycle ends (61-67) hold only the party + the statue room's entity (type `$0E6`). The probe's odd samples (6 entities, ~110 heap pages, ~20 objects) are taken a few frames off, mid room change. Not reproduced.
+  - Next: idle for game hours (wraps of `$7E:0904`, and anything slower) and then fight, or a save state from a game where the numbers stick.
 
 ## Spells and casting
 

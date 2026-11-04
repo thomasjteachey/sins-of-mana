@@ -29,7 +29,8 @@ local function pools()
   local nown = 0; for _ in pairs(owners) do nown = nown + 1 end
   local ents = 0
   for i = 0, 15 do if r16(0x7E2040 + i * 2) ~= 0 then ents = ents + 1 end end
-  return string.format("heap %d owners %d dmafree %d obj7E %d obj7F %d timers %d ents %d",
+  return string.format("clock %04X c904 %04X heap %d owners %d dmafree %d obj7E %d obj7F %d timers %d ents %d",
+    r16(0x7F00C6), r16(0x7E0904),
     heap, nown, walk(r16(0x7F0028), 0x7F, 0), walk(r16(0x7E035B), 0x7E, 0xA7), walk(r16(0x7E035B), 0x7F, 0xA7),
     walk(r16(0x7F00C4), 0x7F, 0), ents)
 end

@@ -20,7 +20,10 @@ for s in range(1, segs + 1):
     if kill is not None:
         cfg += ['KILL_AT = %d' % (((kill - 10 + (n - 1) * step) % 80) + 10), 'KILL_STEP = %d' % step]
     open(os.path.join(ROOT, 'build', 'probe_leak_cfg.lua'), 'w').write('\n'.join(cfg) + '\n')
-    steps = ['w4'] + CYCLE * cycles + ['save:leak_%d' % s, 'shot:leak_%d' % s]
+    steps = ['w4']
+    for c in range(cycles):                         # a screenshot outside after each cycle
+        steps += CYCLE[:-1] + ['w149', 'shot:lk_%d' % (n + c), 'w1']
+    steps += ['save:leak_%d' % s, 'shot:leak_%d' % s]
     r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'run.py'), '--rom',
                         os.path.join(ROOT, 'build', 'som_test.sfc'), '--from', state,
                         '--probe', os.path.join(ROOT, 'tests', 'probe_leak.lua')] + steps,
