@@ -1,0 +1,439 @@
+# Equipment descriptions shown in the equip screen's help box.
+# Drafted by tools/make_desc.py (stats read from the ROM); edit freely.
+#
+# Format:
+#   == Weapons ==            (also: Helms, Armor, Accessories, Shields)
+#   [In-game name]           exactly as the game shows it
+#   first line               at most 32 characters
+#   second line              at most 30 characters (optional)
+#
+# The box only has room for 62 characters in total (a limit of the game's text
+# tiles), so tools/build.py stops with an error if a line is too long.
+# Items with no entry keep the game's normal help text.
+#
+# Abbreviations
+#   Weapons: Atk = attack value, Dly = delay before the next attack,
+#            Hit = hit rate, Crit = crit rate / +crit damage bonus
+#   Armor:   Def = physical / magic defense value, Eva = evade,
+#            CrRes = crit resist, HP = max HP factor
+#   Defense values are the item's own numbers; the Defense you see on the
+#   status screen also scales with the wearer's stats.
+
+== Weapons ==
+[L1 Tech UP]
+Atk 10 Dly 58 Hit 5 Crit 0/+10
+Lv1 tech +20, counter +25
+[Balanced]
+Atk 14 Dly 60 Hit 15 Crit 8/+8
+Strong atk 5MP: normal delay
+[Scapegoat]
+Atk 16 Dly 68 Hit 20 Crit 0/+5
+Draws aggro, lowers your Def
+[YellowDMG heal]
+Atk 12 Dly 53 Hit 35 Crit 9/+12
+Yellow damage heals you (LUK)
+[Poison]
+Atk 12 Dly 54 Hit 15 Crit 4/+6
+Chance to poison (LUK)
+[Silence]
+Atk 12 Dly 54 Hit 15 Crit 4/+6
+Chance to silence (LUK)
+[Super Armor]
+Atk 16 Dly 80 Hit 5 Crit 0/+2
+Strong atk wait: no knockback
+[L2/3 Tech UP]
+Atk 15 Dly 65 Hit 5 Crit 0/+0
+Lv2/3 tech damage up
+[PIE based ATK]
+Atk 12 Dly 54 Hit 15 Crit 4/+3
+Attack uses PIE, not STR
+[AGL based ATK]
+Atk 12 Dly 54 Hit 15 Crit 4/+3
+Attack uses AGL, not STR
+[Pure Critical]
+Atk 16 Dly 63 Hit 15 Crit 18/+40
+No TP gain, big crit damage
+[Crit by TP]
+Atk 12 Dly 53 Hit 15 Crit 20/+30
+Crit rate +2 per TP
+[Evasion]
+Atk 12 Dly 51 Hit 15 Crit 5/+8
+Evade up
+[MP Steal]
+Atk 13 Dly 56 Hit 10 Crit 3/+5
+Attacks steal MP
+[PIE based ATK+]
+Atk 13 Dly 57 Hit 7 Crit 0/+3
+Attack uses PIE, not STR
+[AGL based ATK+]
+Atk 13 Dly 57 Hit 7 Crit 0/+3
+Attack uses AGL, not STR
+[Counter UP]
+Atk 14 Dly 60 Hit 25 Crit 0/+5
+Counter damage up
+[Heal UP]
+Atk 12 Dly 55 Hit 15 Crit 3/+3
+Stronger Heal Light and items
+[Magic UP]
+Atk 12 Dly 62 Hit 15 Crit 3/+4
+Magic power up
+[TP gain UP]
+Atk 12 Dly 58 Hit 8 Crit 0/+0
+Tech bar fills twice as fast
+[Defense]
+Atk 12 Dly 54 Hit 15 Crit 4/+6
+Def up, attack = your Def
+[Death Bringer]
+Atk 12 Dly 53 Hit 15 Crit 6/+8
+Stronger the more you've died
+[Deathless]
+Atk 12 Dly 52 Hit 5 Crit 0/+0
+Atk & Def up while no deaths
+[HP Steal]
+Atk 14 Dly 61 Hit 5 Crit 3/+5
+Attacks steal HP
+[Pierce Resist]
+Atk 15 Dly 60 Hit 5 Crit 2/+7
+Ignores physical resistance
+[Magitech]
+Atk 12 Dly 63 Hit 15 Crit 4/+6
+L2/3 techs hit as INT magic
+[Exorcise+]
+Atk 14 Dly 64 Hit 10 Crit 0/+0
+Turn Undead never deals 0
+[Subterfuge]
+Atk 14 Dly 58 Hit 10 Crit 0/+0
+L2/3 tech: +target's attack
+[Yellow or bust]
+Atk 15 Dly 62 Hit 12 Crit 18/+25
+Non-crit normal hits deal 1
+[CQC Tech]
+Atk 12 Dly 60 Hit 10 Crit 0/+0
+L2/3 techs stronger up close
+[LUK based ATK]
+Atk 12 Dly 54 Hit 15 Crit 4/+3
+Attack uses LUK, not STR
+[LUK based ATK+]
+Atk 13 Dly 57 Hit 7 Crit 0/+3
+Attack uses LUK, not STR
+[Counter Extend]
+Atk 13 Dly 61 Hit 10 Crit 0/+0
+Counters extend counter window
+[TP Heal Boost]
+Atk 14 Dly 58 Hit 12 Crit 10/+0
+Healing up with current TP
+[L3 Armor Break]
+Atk 12 Dly 62 Hit 20 Crit 0/+0
+Lv3 tech lowers Def & MDef
+[Berserker Wolf]
+Atk 14 Dly 62 Hit 10 Crit 0/+0
+Berserker wolf form
+[INT based ATK]
+Atk 12 Dly 54 Hit 15 Crit 4/+3
+Attack uses INT, not STR
+[INT based ATK+]
+Atk 13 Dly 57 Hit 7 Crit 0/+3
+Attack uses INT, not STR
+[Half Vanish+]
+Atk 13 Dly 60 Hit 10 Crit 0/+0
+Half Vanish uses maxHP/2
+[Critical Spell]
+Atk 12 Dly 62 Hit 10 Crit 8/+13
+Spells can crit x1.5 (LUK)
+[EnfeeblingSpell]
+Atk 14 Dly 60 Hit 14 Crit 0/+0
+Spell on weakness: counterable
+[L2/3 Revenge]
+Atk 13 Dly 61 Hit 7 Crit 0/+0
+L2/3 techs up below 300 HP
+[VIT based ATK]
+Atk 14 Dly 54 Hit 15 Crit 4/+3
+Attack uses VIT, not STR
+[VIT based ATK+]
+Atk 15 Dly 57 Hit 7 Crit 0/+3
+Attack uses VIT, not STR
+[Dual Tech]
+Atk 16 Dly 55 Hit 10 Crit 0/+0
+Elem. spells on allies = saber
+[ExploitWeakness]
+Atk 16 Dly 57 Hit 10 Crit 0/+0
+Weakness hits 200% (not 150%)
+[RTFM]
+Atk 15 Dly 56 Hit 10 Crit 0/+0
+More multi-target, Lv2 pierce
+[AoE Mastery]
+Atk 16 Dly 58 Hit 10 Crit 0/+0
+Multi-target spells full dmg
+[CoDzilla]
+Atk 16 Dly 59 Hit 5 Crit 0/+0
+Atk uses PIE, Lv1 tech up
+[Heal Aura]
+Atk 14 Dly 61 Hit 12 Crit 0/+0
+Passive party heal (PIE)
+[Spell Revenge]
+Atk 14 Dly 60 Hit 8 Crit 0/+0
+Spell dmg up with lost HP
+[Enervate Spawn]
+Atk 16 Dly 66 Hit 10 Crit 0/+0
+Enemies -1/8 HP, -2 stats
+[Saber-Elem. God]
+Atk 12 Dly 64 Hit 10 Crit 0/+0
+Non-elem spells use saber elem
+[Quick Cast]
+Atk 14 Dly 61 Hit 10 Crit 0/+0
+Faster casting, magic up a bit
+[Anti-Magic+]
+Atk 12 Dly 62 Hit 10 Crit 0/+0
+Stronger Anti-Magic
+[Drain Counter]
+Atk 14 Dly 57 Hit 17 Crit 0/+0
+Counters heal party HP/MP
+
+== Helms ==
+[Phys. Defense]
+Physical defense up
+Def +7
+[Swift]
+Weapon delay -10, no knockback
+Eva +15  MP +1
+[Magic Defense]
+Magic defense up
+MDef +7  MP +2
+[MindStatusRes.]
+Resist chibi, moogle, silence
+[Attack UP]
+Atk & counter up, no knockback
+[Magic UP]
+Magic & damage item power up
+MP +4
+[Remove Weakness]
+Removes all weaknesses
+MP +2
+[L2/3 Tech UP]
+Lv2/3 tech damage up
+[Constant Reg.]
+Cursed: MP regen while casting,
+-1 MP per tick  MP +3
+[Trials Defense]
+Cursed: Def x1.25, no defense
+vs Lv2/3 techs  MP +1
+[Quick Cast]
+Shorter cast time
+[Crit UP]
+Crit rate +8, crit damage +25%
+
+== Armor ==
+[Exp UP]
+Def 7/5 Eva 0 CrRes 15 HP100%
+Party gains +25% experience
+[Heal UP]
+Def 10/8 Eva 10 CrRes 15 HP105%
+Stronger Heal Light and items
+[High Defense]
+Def 15/6 Eva 0 CrRes 7 HP93%
+High physical defense
+[TP on Dodge]
+Def 6/4 Eva 30 CrRes 20 HP107%
++2 TP when you evade
+[Undead]
+Def 15/13 Eva 0 CrRes 30 HP110%
+Heal hurts, resists 5 ailments
+[Attack UP]
+Def 6/4 Eva 15 CrRes 10 HP102%
+Attack up, no knockback
+[Remove Weakness]
+Def 8/6 Eva 5 CrRes 15 HP95%
+Removes all weaknesses
+[Magic UP]
+Def 6/4 Eva 10 CrRes 10 HP100%
+Magic power up
+[MP Reg. UP]
+Def 8/13 Eva 0 CrRes 15 HP96%
+MP regeneration +1
+[BodyStatusRes.]
+Def 8/6 Eva 10 CrRes 12 HP101%
+Resist petrify, sleep, poison
+[Element Guard]
+Def 8/6 Eva 5 CrRes 7 HP95%
+Resist your neutral elements
+[Auto-Buff]
+Def 8/6 Eva 5 CrRes 7 HP82%
+Cursed: spells auto-buff
+[Spell Dodge]
+Def 10/8 Eva 0 CrRes 7 HP95%
+Cursed: dodge half spell dmg
+[High Health]
+Def 8/6 Eva 3 CrRes 4 HP155%
+Huge HP increase
+[Thorns]
+Def 8/6 Eva 10 CrRes 12 HP100%
+Reflects 175% physical damage
+[Invert Buffs]
+Def 6/4 Eva 5 CrRes 5 HP103%
+Buffs and debuffs swap
+[Trials Buff]
+Def 10/8 Eva 0 CrRes 5 HP100%
+Cursed: 2x pow up, no counters
+[Life Saver]
+Def 10/8 Eva 5 CrRes 5 HP120%
+On death, MP revives you
+[Death Bringer]
+Def 3/1 Eva 15 CrRes 0 HP130%
+Cursed: big attack, can't cast
+[Almighty Magic]
+Def 6/4 Eva 5 CrRes 5 HP100%
+Cursed: spells +1 lv, no elem
+
+== Accessories ==
+[Atk.&Def. UP]
+Minor attack up
+Def +2
+[Fire Weapon]
+Weapon element: fire
+[Petrify Res.]
+Resist petrify
+[Attack UP]
+Attack up
+[Wind Weapon]
+Weapon element: wind
+[Critical UP]
+Hit +10, crit +3, crit dmg +15
+[Debuff Guard]
+Immune to standard debuffs
+[Trials Skill]
+Cursed: no crits either way
+and no accuracy misses
+[Ice Resistance]
+Resist ice, lower defenses
+[HP Steal]
+Attacks steal HP
+[TP Quick Cast]
+Magic up a bit, TP is spent
+to shorten casting
+[Quick Item]
+Items cost 2 TP (need 4)
+[TP by Cast]
+Casting gives 2 TP
+[Meta: Pressure]
+Spell upgrade: Pressure
+[HP Regeneration]
+Max HP +60, HP regeneration
+[Death Bringer]
+Atk, hit, crit up, can't cast
+Stronger with death score
+[Poison Weapon]
+Weapon inflicts poison
+[Dark Resistance]
+Resist dark, lower defenses
+[Evasion UP]
+Evade up
+Eva +10
+[Accuracy UP]
+Accuracy +50
+[Poison Res.]
+Resist poison
+[Spell: Resist]
+Cursed: teaches Resistance
+[MP Steal]
+Attacks steal MP
+[TP gain UP]
+Tech gain up (doesn't stack)
+[Death Res.]
+Immune to death spells,
+party resists them
+[Ailment Res.]
+Cursed: resist all ailments,
+enemies gain 2 levels
+[Wind Resistance]
+Resist wind, lower defenses
+[Magic Defense]
+Magic defense up
+MDef +5
+[Magic UP]
+Magic power up
+[Silence Res.]
+Resist silence and
+ignore can't-cast effects
+[Trials Element]
+Cursed: no resist/weakness,
+death score frozen at 1
+[Ice Weapon]
+Weapon element: ice
+[Break Counter]
+Counters lower enemy defense
+[Meta: Sudden]
+Spell upgrade: Sudden,
+spells use all your MP
+[Petrify Weapon]
+Cursed: weapon petrifies,
+all your damage x0.5
+[Fire Resistance]
+Resist fire, lower defenses
+[Spell: Regen.]
+Cursed: teaches Regeneration
+[Dark Weapon]
+Weapon element: dark
+[Power Attack UP]
+Power attack damage up
+[Heal UP]
+Stronger Heal Light and items
+[Meta: Multi]
+Spell upgrade: multi-target
+[Undead]
+Heal hurts, less death penalty
+Def +10  MDef +10
+[Meta: Curse]
+Cursed: spell upgrade: Curse
+[Tinkle Heal]
+Tinkle Rain also heals 25% HP
+[Light Res.]
+Resist light, lower defenses
+[Phys. Defense]
+Physical defense up
+Def +5
+[Critical Guard]
+Halves enemy crit rate
+[Dream Res.]
+Resist sleep, chibikko, moogle
+[Meta: LeafCoat]
+Spell upgrade: Leaf Coat
+[Earth Weapon]
+Weapon element: earth
+[Blood Magic]
+Cast from HP instead of MP,
+spells cast a bit slower
+[Light Weapon]
+Weapon element: light
+[TP Regeneration]
+MP regen ticks also give +1 TP
+[Earth Res.]
+Resist earth, lower defenses
+
+== Shields ==
+[Health UP]
+Max HP up
+Draws aggro
+[Poison Res.]
+Resist poison
+Draws aggro
+[Silence Res.]
+Resist silence
+Draws aggro
+[Petrify Res.]
+Resist petrify
+Draws aggro
+[Dream Res.]
+Resist chibikko and moogle
+Draws aggro
+[Critical Guard]
+Halves enemy crit rate
+Draws aggro
+[Phys. Defense]
+Physical defense up
+Def +5  Draws aggro
+[Magic Defense]
+Magic defense up
+MDef +5  Draws aggro
+[Evasion UP]
+Evade up
+Eva +15  Draws aggro

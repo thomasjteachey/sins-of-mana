@@ -1,0 +1,312 @@
+# Equipment description box: research notes
+
+Goal: show what the highlighted gear does inside the game's equip screen, instead of looking it up in the spreadsheets.
+
+## Base files
+
+- Clean ROM: `Seiken Densetsu 3 (Japan).sfc`, 4 MB, unheadered, MD5 `58ebd7cbf28ceadc03aec4f448956a0b`.
+- Apply `Seiken Densetsu 3 (J)_sinofmana_2060.ips` to get the mod. The result is 6 MB, ExHiROM + FastROM (header map mode `$35`).
+- `tools/ips.py CLEAN.sfc PATCH.ips OUT.sfc` applies a patch.
+
+## Address mapping (ExHiROM)
+
+| SNES address | File offset |
+|---|---|
+| `$C0-$FF:0000-FFFF` | `0x000000-0x3FFFFF` (original game) |
+| `$40-$7D:0000-FFFF` | `0x400000 + (bank-$40)*0x10000 + addr` (expanded area) |
+| `$00-$3F:8000-FFFF` | mirror of `$40-$7F` upper halves |
+| `$80-$BF:8000-FFFF` | mirror of `$C0-$FF` upper halves |
+
+`tools/dis65816.py ROM C0EADA 40 m16 x16` disassembles. It tracks REP/SEP, so give it the right starting M/X flags.
+
+## Text system (English translation + mod)
+
+- Original strings live in banks `$F9-$FB`, in the translation's compressed encoding.
+- JSL jump table at `$C0:0700+`. Entry `$C0:075C` jumps to the translation's print routine at `$C0:EADA`.
+  - In: A = string bank, Y = string address, X = text-window record (bank `$7F`).
+  - The record gets: `$00,X` = address, `$02,X` = bank, `$04,X` = 1, `$08,X` = 0, `$14,X` = `$FEFE`.
+- Mod redirect hook at `$40:7960` (called from `$C0:EAF4`): when the bank is `$FB` and `$52:0000 + addr` holds a non-zero byte N, the string is replaced with `$53:(N*16)`.
+  - So `$53:0000-0FFF` holds 256 fixed 16-byte slots of plain ASCII. `$FF` ends a string.
+  - Control codes seen: `$12` = newline, `$0C` = cursed-item marker, `$C1/$C3/$C5` = layout codes, `$14 $0A` and `$14 $0D` unknown.
+- `tools/remap.py ROM` lists all 453 redirects.
+
+## Item name slots in `$53`
+
+| Slots | Contents |
+|---|---|
+| `$11-$2B` | weapon effect names |
+| `$31-$3C` | helm names |
+| `$41-$54` | armor names |
+| `$61-$96` | accessory names |
+| `$A1-$A9` | shield names |
+| `$B1-$BD` | alt-stat weapon names |
+| `$C1-$C6` | capstones |
+| `$D1-$E8` | class-specific final weapons (4 per character) |
+
+Each original name string (in bank `$FB`, around `$1C70+`) is redirected to one of these. The slot order matches the row order in `armor_elements_stats.xls`.
+
+## Garbage room tiles after the equip screen (icon palette guard, 2026-11-03)
+
+User: "leveling up and then going in and out of the equip screen made the game glitch out graphically" (Deck, build `da9ad711`; saved to state 5).
+
+- State 5 (ice cave, after the menu): the room's BG1 ceiling is a 16-pixel grid of junk. BG1's map repeats block 0 there, and block 0 of the room's tile-block table (`$7E:8C00`, 8 bytes per 2x2 block, built at map load) is `0080 0C83 10E7 194B` instead of `0080 0080 0080 0080`: `$7E:8C02-$8C0F` hold 7 colours = entry 238 of the item-icon palette table (`$FD:4200` + 14 * n). Two more icons' colours (entries 27, 35) sit at `$7E:FB32` and `$7F:2B22`. VRAM maps and tiles were fine; the game rebuilt BG1 from the bad block.
+- Writer: the equip screen's icon palette copy `$E8:C18F` (only caller `$C4:4DBC`, the icon drawer): 7 colours to `$7E:4802 + $0120 + 16 * [D+$79]` (D = the equip screen's page, `$0A00` in the user's saves), then `[D+$79]` + 1, back to 0 at 12. The three addresses mean `[D+$79]` was `$x42E`, `$xB21`, `$xE20` (low 12 bits) at three calls; each bad value is used once, then wraps to 0. Simulated (`tests/probe_badslot.lua`, counter set to `$042E` at the first call): the same ceiling grid after leaving the menu; walking to the next area and back reloads the table and clears it.
+- Not found: what put those values there. Only the equip code writes `[D+$79]` in every test (`tests/probe_dp79.lua`: every menu screen, slot / item cursors, forced DMA-budget waits at `$C4:4DA9` with `tests/probe_forcewait.lua`); the user's state 4 -> level up -> menu -> EQUIP -> back on the Deck's core, old and new build: clean. The equip screen's stack shares the page with its variables (`$0A00` up; S `$0AC3-$0AD9` when the text hook runs) and reaches `$0A92-$0A94` (the scheduler saving a waiting task, `$C0:4A36-4A42`; deepest inside `SlotHelpRedraw`), 25 bytes above `$0A79` - a stack running into the variables is the likeliest cause, unconfirmed (`tests/probe_slotstack.lua`, `tests/probe_stackdump.lua`).
+- Guard (`src/main.asm`, equip descriptions patch): `$E8:C19E` (was `LDA $79 : ASL #4 : CLC : ADC #$0120 : TAX`) -> `JSL IconSlot : TAX : NOP x6`; `IconSlot` lets only 0-11 through (anything else counts as 0 and is stored back), so a bad counter gives one icon the wrong colours instead of writing into RAM. Same result for 0-11 (equip screens identical); simulated bad counter: block table intact, counter carries on 0, 1, 2.
+
+## Equip screen help box
+
+- The help text "Select the new equipment / and press the Confirm button." is original string `$FB:1855`, redirected to `$53:0F80` (slot `$F8`).
+- Confirmed in-game: changing `$53:0F80` changes the bottom-left box on the EQUIP screen (`build/shots/equip_test.png`).
+## Description add-on: how it works (`src/main.asm`)
+
+- `$40:7960` (mod's text redirect hook) → `JML NewRedirect` at `$56:8000` `GetHelpDesc` reads the current character (`$61`) and the slot being changed (`$40`) relative to the caller's direct page: the equip screen's page moves between sessions (`$0500` in the prologue, `$0A00` in the user's later saves). Until 2026-11-02 it read `$7E:0561`/`$7E:0540`, so in later saves the item lists showed another slot's description (e.g. Quick Item's text on the weapon "Poison"). For `$FB:1855` it calls `GetHelpDesc`; if the highlighted item has a description, the string is swapped for it. Every other string goes through the original redirect logic unchanged.
+- `GetHelpDesc` finds the item without any RAM of its own:
+  - cursor sprite Y `$7F:0129` < 96 → slot list: slot = (Y-6)/16, item = character record `+$BC+slot`.
+  - otherwise item list: cell = row*2 + (X ≥ 120), slot = `$40`; cell 0 = equipped item, else `record + $C4:8693[slot] + $90 + cell-1` (same as `$D1:E751`).
+  - character record = `$7E:2040[$61*2]`; item → name address via `$C4:B31E`/`$C4:B51E`; name address → `$52` remap slot → `DescTable` entry.
+- The game redraws the help box on item-list moves (`$C4:84AB`) but not on slot moves. `SlotHelpRedraw` replaces `LDA #1 : STA $46` at `$C4:81AB`, `$C4:81F5` (slot up/down) and `$C4:828B` (B back from the item list) and calls `$C4:9D8E` (via the RTL at `$C4:9CEE`).
+- Descriptions and `DescTable` live at `$53:8000+`: the mod's glyph reader (`$40:7920`) only reads plain ASCII from bank `$53`; any other bank is decoded as compressed text (garbage, or a hang).
+
+## Text tile budget (why lines are 32 + 30 characters)
+
+- Menu text tiles come from one pool per screen: `$57` = next tile (starts at `$59`), +4 per 16-pixel cell (2 characters per cell, regardless of glyph width). Pool wraps at `$2400` back to `$2020`.
+- Equip screen: stats labels `$2154-$2208`, help box `$2208-$2284` (31 cells, sized by the main-menu preview text drawn there first), then the item list and equipped list, which wrap around and end exactly at `$206C`, right before the status window (`$2070`). The pool is full.
+- So every help text must use exactly 31 cells: line 1 padded to 32 characters, line 2 to 30 (`tools/build.py`). Longer overwrites the item list's tiles; a different split leaves stale tiles on screen.
+- Control codes: `$12` newline, `$14 n` skip n cells (no clearing), `$15 n` pad with blanks to cell n (underflows if already past n), `$C1/$C3/$C5` colours.
+
+## Equipment stat data (read by `tools/make_desc.py`)
+
+| Data | Location (+ item index) |
+|---|---|
+| weapon record, 22 bytes | `$D1:6930 + idx*22`: `+$0D` hit, `+$0E` crit rate, `+$10` attack value |
+| weapon delay / crit bonus / Lv1 bonus / counter bonus | `$50:4F00` / `$50:1E00` / `$50:2000` / `$50:5000` |
+| helm/armor/accessory/shield record, 26 bytes | `$D1:7F30 + idx*26`: `+$10` evade, `+$12` phys def, `+$14` magic def, `+$19` status resist bits |
+| armor HP factor / crit resist / helm max MP | `$50:3E00` / `$50:2900` / `$50:6000` |
+
+- Stat routine `$D0:C069` (equip preview) sums defense values ×12 via the mod's `$40:0900`, then scales with the wearer's stats.
+- Item index = the byte the game stores (character record `+$BC` weapon, `+$BD` helm, `+$BE` armor, `+$BF/+$C0` accessories). Duran: weapons 1-42, helms 1-12, armor `$7F-$92`; accessories `$49-$7E` (shared); shields `$F7-$FF`.
+
+## no_popup_messages fix (`src/no_popup_fixed.asm` → `build/no_popup_messages_fixed.ips`)
+
+- The original patch puts `RTS` at `$D0:CE53` and `$D0:D01A`. `$D01A` is only the status-ailment message, but `$CE53` is the routine that applies stat buffs/debuffs (Life Booster, Magic Shield, Power Up, ...): popups via `JSR $CDFD`, then merging the new bits into the character's battle record `+$35..+$37`, `JSR $CEF9` recalcs, and storing the bits. With the `RTS`, buffs never apply.
+- Fix: `RTS` at `$D0:CDFD` (display-only popup loop) instead; restore `$D0:CE53`; NOP the message calls (`JSL $C4007C`, `JSR $D598`, `INC $04` ×2) in the special buff field paths (`$CEEA`, `$CEF1`, `$CF6B`, `$CF73`, `$CF95`, `$CF9C`), keeping their state calls (`$D0C7E0`/`$D0C7FD`, `$D4BF`, `$D8D0`).
+- Test: `tests/probe_buff.lua` catches the game's own `JSR $CE53` at `$D0:C33D` in the tournament fight (state `pro1`) and swaps in buff bits (`BUFF_A`, `BUFF_X`), with `POPUP_MODE` = none / old / fixed. Result: none and fixed store the buff bits; old stores nothing. None shows the popup ("Magic defense up", "Body became transparent"); fixed doesn't.
+- The fixed patch also writes `$D0:CE53` back to `$86`, so it repairs a ROM that already has the old patch.
+
+## Bars, buff markers and HUD tags (`src/bars.asm` → one patch per feature)
+
+Patches (2026-11-02, split on request; the old all-in-one `sinofmana_bars.ips` is gone):
+
+| Patch | Switch (`src/bars.asm`) | What it adds |
+|---|---|---|
+| `sinofmana_revenge_bar.ips` | `FeatRevenge` `$CB:F4F0` | revenge bar under enemies |
+| `sinofmana_enemy_buff_markers.ips` | `FeatMarkers` `$CB:F4F2` | raised/lowered-stat arrow at the left end of the enemy bar (alone: on an empty bar) |
+| `sinofmana_party_cast_bar.ips` | `FeatCastParty` `$CB:F4F4` | cast bar under party members |
+| `sinofmana_enemy_cast_bar.ips` | `FeatCastEnemy` `$CB:F4F6` | cast bar under enemies (under their revenge bar if shown, else in its place) |
+| `sinofmana_party_buff_icons.ips` | `FeatHudIcons` `$CB:F4F8` | buff/debuff icons beside the party HUD |
+| `sinofmana_levelup_info.ips` | `FeatLevelInfo` `$CB:F4FA` | info panel at the level-up stat choice: what the highlighted stat does, the next spell it unlocks in the current class (from the game's own table) + the character's Lv60 capstone for it (see "Level-up info panel") |
+| `sinofmana_shop_descriptions.ips` | `FeatShopInfo` `$CB:F4FC` | the equip-screen descriptions in a shop's buy / sell ring, in the same top panel (needs `sinofmana_equip_descriptions.ips`, which notes the printed item name; see "Shop descriptions") |
+
+- Each holds the whole engine (hooks, code, tiles: the same bytes in all five) plus its own switch word = `$0000`. The switches are in ROM that is `$FF` in the base game, so an unwritten switch reads `$FFFF` = off. Any subset applies cleanly in any order (`tools/build.py` checks that no two patches of the set write different bytes to the same place).
+- With no bar feature on (only the HUD icons), the per-entity loop and the text-row scan are skipped. `CastStart` always records casts (cheap).
+- Checked (Mesen, user's ROM + one patch each): revenge only = bar with a plain left end and no icons; markers only = arrow on an empty bar; revenge + markers = bar with the arrow; party cast only = cast bar under Duran, none under the knight; HUD icons only = icons and no bars; all five = per-frame bar slot table and HUD cells identical to the old all-in-one build for 40 frames (`tests/probe_barstate.lua`); later battle frames differ only because the extra switch checks shift lag frames (enemy timing), menus are pixel-identical.
+
+History (2026-11-02): v1 HUD tick-gauge tiles over sprites (disliked); v2 custom bars in BG3 cells (8 px steps, 30 Hz: "too low FPS"); v3 pixel-smooth via HDMA; v4 (current) restyled to match the HUD + enemy buff markers + party buff tags.
+
+What's on screen
+- Revenge bar under enemies (hate / threshold): green (0-4 of 12 steps), yellow (5-8), red (9-11), flashing red/gold when full. Left end: green ▲ = enemy has raised stats (Antimagic it), red ▼ = lowered stats (both: ▲ at the left end and a mirrored ▼ at the right end; until 2026-11-02 they took turns every 32 frames). An enemy with stat changes but no hate gets an empty bar to carry the arrow.
+- Cast bar under anyone casting: blue with a small diamond at the left end, gold when ready; under an enemy's revenge bar if it has one. It follows the cast's own timer, so it stands still whenever the game pauses the cast (ring menu, hits); see "Cast timing" below.
+- Bar look: 4 px tall, 24 px track, dark outline (the HUD's dark brown, colour 1) with rounded ends, fill = highlight row (colour 3) over base row (colour 2), 2 px steps. Art is ASCII pixel art in `tools/make_bargfx.py` (written to `build/bargfx.asm` by `tools/build.py`).
+- Party buff icons beside the HUD (2026-11-02, replaced the "▲ATK ... +N" text tags): one 8x8 icon per changed stat, green raised, red lowered, gold Lucid Barrier; raised first. Icons (pixel art in `tools/make_bargfx.py`, tiles `$0D4-$0DC`): sword = attack, shield = defense, wand with sparkle = magic effectiveness, shield with sparkle = magic defense, reticle = hit, boot (side view, toe to the right) = evade, heart = max HP, drop = max MP, ghost = Lucid Barrier. The user found star / bullseye / bubble / feather / a boot with speed lines too ambiguous; sword and shield were fine from the start. The boot was picked from a row of candidates (plain L-shaped boot, 3-pixel shaft). Layout: bottom block right of it (rows 23-24, cols 22-30, left-aligned), top right block left of it (rows 1-2, cols 17-21, right-aligned), top left block right of it (rows 1-2, cols 11-15). 2 rows × 9 / 5 cells: all 9 always fit.
+
+Stat-change fields (battle stats `+$35..+$37` = record `+$C5..+$C7`, 2-bit, 1 = raised, 2 = lowered, 3 = special/cancel; names from the game's own popups)
+| byte | bits 7-6 | bits 5-4 | bits 3-2 | bits 1-0 |
+|---|---|---|---|---|
+| `+$35` | Attack power | Hit rate | Evade rate | special (?) |
+| `+$36` | Magic defense | Magic effectiveness | Defense power | special (?) |
+| `+$37` | Lucid Barrier ("Body became transparent") | Maximum HP | Maximum MP | special (?) |
+- Popup: `$D0:CDFD` shows message `$10+n` (raised) / `$1C+n` (lowered) for field n = 11..0 (top of `+$37` down to the bottom of `+$35`). The buff routine `$D0:CE53`: X = `+$35/+$36` bits, A = `+$37` bits. Test with `tests/probe_buff.lua` (`BUFF_A`, `BUFF_X`) on `build/som_desc.sfc` (no no-popup patch).
+- The special (low-bit) fields show no popup with values 1-3; set elsewhere, meaning unknown.
+
+HUD
+- BG3 HUD blocks: top left rows 1-4 cols 1-10, top right rows 1-4 cols 21-30, bottom rows 23-26 cols 11-20. Battle message box: lines 38-61, drawn in mode 5 on BG1/BG2 by the game's HDMA (BG3 not shown there).
+- Which party member each block shows: the HUD task keeps [bottom, top right, top left] record pointers at its direct page + `$26` (code `$C4:5B68`: `LDA $26,X`), but that page moves between sessions (`$7E:0926` in the ice cave test, `$7E:0A26` in the user's game; random other data there otherwise). So the tags read the HUD's own digits instead: the block's HP row ("cur/max" in the big font, digits `$020-$029`, '/' `$02A`; top blocks row 1, bottom row 23) and match max HP (`+$A2`), with current HP (`+$92`) as tie-break. The bottom block is the character you control; the others rotate (right = next slot, left = the one after).
+- Mod auto-buffs (equipment "auto-buff ..." effects) OR plain "raised" values into the stat-change fields (`$41:05B7`: tables `$50:6400/6500/6600` & `$54` into `+$35/+$36`, `& $02` into `+$37`), so they show as tags. `$41:0FC0` ORs "lowered" values (`& $A8`) per known spell (`+$145` list) for fighters with flag `+$CA & 4`; `$40:6B6A` sets bit 1 of `+$37`; `$40:3150` clears bit 4 of `+$37`.
+- BG3 font (resident in battle): A-Z `$04A-$063`, a-z `$064-$07D`, digits `$080-$089`, `+` `$03D`, ▲ `$02E`, ▼ `$02F`, blank `$0FF` (blank cells carry any flags, e.g. `$00FF`, `$30FF`). Kana `$08A-$0FE` are never shown in the English game (checked every frame); our 20 tiles live at `$0C0-$0D3`.
+- HUD palettes (BG3 0-4): colour 1 dark brown everywhere; 0 blue, 1 green, 2 yellow, 3 red, 4 gold/white (the HUD's own low-HP colours).
+- HUD flicker: every other frame the HUD task (`$C4:5A39` -> `$C4:5ECF`) steps colours 2-3 of BG3 palettes 0-3 through 3 shades it keeps in RAM (`$7E:3000` bright, `$7E:3020` middle, `$7E:3040` dark; order middle, bright, middle, dark = an 8-frame cycle), copying entries 1-15 into the CGRAM copy `$7E:4800` (`$C4:5F01`) and asking for the upload (`$7F:0330 |= 4`, `$C4:5EF5`). Users: palette 0 = tech gauge (always), 2 = low-HP digits, 3 = critical / 0-HP digits, and a BG3 text printer (`$C4:56DF`: palette 3 if DP `$32` = `$7E:3156`, palette 1 if 4 <= DP `$36` <= 6, else 4; never seen non-white in testing). The HP digits are the big-font tiles `$020-$029` in each block's HP row.
+- Steady marks (2026-11-02, user: "make the buffs/debuffs not flash"): `PulseFix` (`$56:A05F`, hooked at `$C4:5EF5`) puts palette 1 back on its middle shades after every step, and palettes 2 / 3 too while no HP digit shows in them (`!Warn`). So icons, arrows and bars are steady; the gauge and the game's own low/critical digits still flicker. While a critical digit needs palette 3, the red icons and ▼ use BG3 palette 5 instead (`!RedPal` = `$1400`): CGRAM 21-23, BG palette 1 colours 5-7 = window colours (border greys / first green), unused unless a window is up. The NMI hook (`NmiRed`) writes palette 3's middle shades there while Bars asks (`!Borrow`, 16 frames; the game skips Bars for up to ~7 frames while it sets up the ring menu, the main menu shows ~80 frames after Bars stops) and nothing is on HDMA; otherwise it copies the window colours back from `$7E:482A`. Every window is drawn through HDMA (ring menu, message boxes: channels 2-7 = `$2105` mode/maps, `$210D`, `$210F`, `$212C`, `$210B`, `$2130`); tall message boxes use all of CGRAM 20-31, the ring window 20-25 and 31. If the game turns HDMA on while the red is in CGRAM, its channels stay off for up to 3 frames (`!Keep`) until Bars has moved the marks back to palette 3, so the window opens that much later instead of the marks showing window colours for a frame. While a window is up and someone is critical, red marks flicker with the digits (no free colours then).
+- Checked on the Deck (Snes9x core, user's state 1 = inn, `deck_harness.py` with `keeprec:` stat bytes and `every:1`): every HUD cell pixel-identical for 16 frames with buffs/debuffs shown; with a member at 0 HP only the red "0" digit changes (icons on the borrowed palette 5 stay put); opening the ring menu then: no icon pixel in window colours in any frame, window rows full of window colours and none of the borrowed red. The user's Plus states (all made with the original ROM, none newer than 2026-09-16; `state.auto` is a 20-byte stub) hold no code position this build moved (`tools/statecheck.py` + a check for `$C4:5EF5-$5F00`, bank `$CB` mod code and `$56:A000+`).
+- Checked (Mesen): `tests/probe_cgram.lua` (palettes 1-3 one value each, palette 0 still 3), `tests/probe_crit.lua` (critical member: red marks in palette 5 with steady CGRAM 21-23, critical digits still flickering; ring open: window colours exact, marks back on palette 3), `tests/probe_blip.lua` (frame by frame around 3 ring opens/closes with a member at 0 HP: no frame with a window in our red or a palette-5 mark in window colours), single patches (cast bar only: all 4 palettes flicker as in the original; icons only / markers only: steady).
+
+How the bars are drawn
+- Each bar lives in an off-screen BG3 map row (rows 28-31; two per row: upper tile set in pixel rows 0-3 at cells 0-4, lower set in rows 4-7 at cells 16-20), max 8 bars. HDMA channel 1 (mode 3: `$2111`×2, `$2112`×2, direct) scrolls BG3 on only the bar's 4 lines; other lines get scroll 0. Bars whose lines would touch are pushed down; a bar is left out while BG3 rows on its lines hold game text (target name: rows 8-9), from a per-row scan (`!RowBusy`, one row every other frame).
+- Calibration (Mesen): an entry starts on the screen row equal to its running line count; screen row r shows BG3 line r + VOFS + 1.
+- NMI hook `$C0:22BC` (was `LDA $0032 : STA $00420C`): runs after the game's DMA uploads (`$C0:25EC`, incl. CGRAM) every frame; borrows / returns CGRAM 21-23 (`NmiRed`, see "Steady marks"); enables channel 1 if the table is fresh (built within 2 frames) and the NMI hasn't run past line 224 (a long upload burst can push the NMI into the next frame; enabling HDMA then starts it mid-picture, so that frame is skipped). Normal fights: the hook runs by line 255.
+- Channel use: game uploads = DMA channel 0; spell effects and the message box = HDMA 2-7 (`$7F:0032`); channel 7 is also set up for BG3 scroll (indirect) but off in normal battle frames. Channel 1 unused by the game.
+- **Spell effects can take BG3 over** (Fiegmund's water/ice spells): the game's PPU register copies at `$7F:0800 + reg` switch to BGMODE `$7F:0805` = `$01` (BG3-on-top bit off, normally `$09`), TM `$7F:082C` = `$14`, TS `$7F:082D` = `$13`, CGADSUB `$7F:0831` = `$24`, and the VRAM BG3 map is replaced by the effect's map (the HUD vanishes). Our HDMA band then cut a 4-line stripe through the effect overlay ("bar glitching out as he casts"). Fix: while `$7F:0805 & 8` is clear, Bars does nothing and the NMI hook leaves channel 1 off; afterwards everything is set up again (tiles re-sent after any gap of 4+ ticks: power-on, menus, map changes, effects). Verified on the Deck (build `b807d16f`, harness runs 6-7 from state 4): the BGMODE copy goes `$09` -> `$01` at frame 2174, `$420C` stays `$00` through the whole spell (fog and ice-pillar effects), no band; bars come back about 24 frames after `$09` returns (the re-setup). The short dark dashes on the ice pillars are the effect's own art (they move between frames, HDMA is off). Before the takeover the game briefly runs HDMA 2-7 (`$7F:0032` = `$FC`) with one-line tables that just set its normal values (BGMODE `$09`, TM `$17`), so BG3 is still the HUD then.
+- Fiegmund casts instantly (state `$04` while acting, never the `$0A` charge state), so he never gets a cast bar.
+- RAM `$7E:2800-$7E:2A6F` (free in battles, menus, field, dialogs; title clears it): cast book, bar slots, owned/seen masks, two 128-byte HDMA tables, HUD tag bookkeeping (`!HudLast`, `!TagList`, `!HudSig`). `$7E:2BD0-2BD1`: `TextCount` of `src/menuspeed.asm`.
+- HUD tags: one block every other frame; skipped when record + stat bytes + shown flag are unchanged and its first cell is still ours. Cells are only cleared if they still hold what we drew. Changed HUD rows (1-2 / 23-24) are uploaded by us.
+- Setup (first bar, then every 256 frames): blanks rows 28-31, sends tiles; once per session sweeps rows 5-22 for v2-style bar cells (tiles `$001-$006`) from old save states (one ~130k-clock frame).
+- Cost (ice cave, `tests/probe_validate.lua`): ~20k master clocks per frame (≈5.5%), one ~130k frame at the first activation. The game isn't CPU-bound (38% extra CPU didn't change its skipped frames).
+- Hook `$FD:6E24` (sprite builder; was `JSR $6E9B : SEP #$20`), code at `$CB:E400` (FastROM padding `$CB:E357-$CB:FCFF`); `.back` stays at `$CB:E40B` for save states. `CastStart` at `$56:A000`, hook `$D0:FB12`.
+- Cast timing (2026-11-04, user: "the cast bar is still counting down when i'm in a ring menu?"): after `CastStart` the battle script waits `v + 1` ticks on one of the game's timers (`$C0:C960`: 16-byte records in bank `$7F`, around `$7F:1800-$1A1F`, linked from `$7F:00C4` in wake order; `+$00` next, `+$02` owner, `+$04` wake tick of the clock `$7F:00C6`, `+$06` length, `+$08` time left while suspended), then the spell goes off about 11 ticks after it runs out (state `$0A` -> `$04`). The game suspends timers: all of them while the field is paused (ring menu: `$C0:CB00`, the mod's `$40:16C0`; seen at the save statue: field timers off the list, time left in `+$08`, put back with wake = clock + left), and one task's at a time (`$C0:CA60`: e.g. a caster being hit, which is why the tournament cast 455 took 570-577 ticks and the old `v + v*13/64 + 32` estimate fit there and nowhere else; at the save statue 193 took 221). The bar used to count `$7F:00C6` from `CastStart` against that estimate, so it kept filling in the ring menu and was off whenever a cast got paused. Now `CastStart` records the wait's length (`v + 1`) and Bars finds the timer (`FindCastTimer`: that length, started at most 16 ticks ago, not another slot's) and shows length - time left (`+$08` while suspended, else wake - clock); when it runs out the slot shows "ready" (gold) until the spell goes off (stale after 240 ticks). Checked (Mesen): Duran's Heal Light at the save statue (poke `$7F:E211=05` so the object in entity slot 3 counts as an enemy: real cast time) - timer found the frame after `CastStart`, ran out at +210, spell at +221, bar fills then gold; ice cave: Duran's and Angela's casts each suspended mid-way (16 and 44 frames, the other timers kept running), the bar stood still on the saved time and went on after; bars blip test unchanged. Not seen: the ring menu opened during someone else's cast (controller input kept missing the window in testing).
+- **DMA job type must be `$01`** (type bit `$10` messages the allocating task; an enemy script took it as a command → brightness pointer `$7F:00A0` overwritten → black screen).
+- Stack: S = `$03F0` at the hook; with the 44-byte frame the code reaches about `$03AF`. `$0380-$03EF` is only read as stack.
+- Save states: `tools/statecheck.py`; the user's states are clear.
+- Reproducing on the Deck itself: `tools/deck_harness.py` (copy to `/tmp/somh/` and run with the Deck's python3): headless libretro driver for the Deck's own `snes9x_libretro.so`; loads the ROM + a RetroArch state, scripted input (`up:400`, `b:3`, `w60`), `shot:`/`save:` (Snes9x snapshot, parse with `tools/s9xstate.py`; block `FIL` = last value written to every register `$2000-$5FFF`, `DMA` = 8 × 19-byte channels), `every:N`, `castshots:N`, `keephate:S=V`, `keeprec:S:OFF=HEX[@N]` (hold bytes in an entity record, e.g. stat changes `keeprec:1:C5=880008` or HP 0 for 8 frames `keeprec:0:92=0000@8`), and a per-frame log of enemy states, bar slots and the BGMODE copy (`bgXX`). Snapshot `DMA` 16-bit fields are big-endian (table address = bytes 7-8). Paths on the Deck: `R=/run/media/deck/1fb496c3-9151-4748-b052-7abce079d3d4/steamapps/common/RetroArch`, core `$R/cores/snes9x_libretro.so`, states `$R/states/Sins of ManaNORMAL Plus.stateN`. State 4 of the user's Plus states: main menu open near Fiegmund (`b:3` ×3, then `up:400`).
+- Tested: ice cave (hate, enemy buffs/debuffs, party tags incl. "+N", clearing), tournament cast bar, ring menu, prologue one-character HUD, Fiegmund's spells on the Deck (BG3 takeover). Not tested: an enemy with a charge-up cast, a 2-member party HUD.
+
+## Long-session glitch hunt ("memory leak")
+
+Reported symptoms (forum): after long play / heavy spell use: garbled graphics, lost control, menu sprites shown on the battle screen, damage numbers that stay on screen.
+
+Resource pools and how to measure them from a RAM dump:
+- Heap pages: owner table `$7E:2100-$21FF` (byte per 256-byte page, 0 = free, else process ID from `$7F:008C`); `$7E:2200` next/high page, `$7E:2202` base. Allocator `$C0:5869` (blocks, rounded to 4 bytes), pages `$C0:5575`, free blocks via `$C0:57ED` (descriptor pointer `$7F:0064`).
+- DMA jobs: free list head `$7F:0028`, linked through job `+$00` (about 55 free when idle).
+- Sprite objects: draw list head `$7E:035B` (sprite engine DP `$0300`), linked through object `+$A7`.
+
+Soak test so far (tournament fight, Duran with poked spells; `tools/spam.py STATE SEGMENTS CASTS SPELL_ENTRY`, `tests/probe_castcount.lua`):
+- ~200 Fireball + ~80 Magic Shield casts, ring menu opened every cycle: heap 107-110 pages, 12-13 objects, ~55 free DMA jobs at every checkpoint. No growth, no visible glitches. Not reproduced yet.
+- Not covered: fights with many enemies, map changes, enemy spells, summons, Lv2/3 techs, items, level-ups, chests/trap wheel.
+- Mesen's headless runs stop after roughly 1.5-2 minutes of wall time; `spam.py` chains short segments through save states.
+
+## Spells and casting
+
+- Character record (Data Crystal RAM map): `+$145` spell list (bytes, spell ID + 1, 0 = empty), `+$94` MP, `+$A4` max MP, `+$B1` level (0-based), `+$B3/+$B4` class.
+- Spell table: 17-byte records at `$D1:9938 + ID*17`, `+$0F` MP cost, `+$10` base cast time. IDs = row order of the mod's spells sheet (Heal Light 32, Magic Shield 33, Tinkle Rain 34, Life Booster 39).
+- Cast start: `$D0:FAE5` reads the base cast time, `JSL $401740` (mod) turns it into the cast value using the caster's stats, `JSL $C40018` pushes it onto the script stack. Casting state = record `+$00` `$0A`; `$04` when the spell fires.
+- Mod quirk: `$40:6880` treats "no enemy present" as instant cast; it checks entity slots 3-5 via their level byte `+$B1`, so a level-0 enemy (the tournament knight) counts as absent and every spell casts instantly.
+- Test states (Mesen, `build/som_test.sfc`): `cast_ready` = tournament fight, Duran knows Heal Light, 30 MP, target selection open (poke `$7F:DA11=05` before casting for a real cast time); `casting` = 30 frames into a Heal Light cast.
+
+## Enemy revenge (hate) data
+
+- Entity table `$7E:2040`: word pointers into bank `$7F`. Slots 0-2 = party, 3-15 = enemies/NPCs (tournament: slot 3 = the knight at `$7F:D960`). Slots 16+ = the same records `+$90` (battle stats).
+- Entity record: `+$00` active, `+$01` side (1 = party, 2 = enemy in the tournament), `+$04` sprite object pointer (`$7F:xxxx`), `+$10` current target record.
+- Battle stats = record `+$90`: `+$00` (word & `$1FF`) enemy type; hate = byte at stats `+$90` (record `+$120`), capped at 200. Regular attack +3 (`$40:3E62`), spells +40 (`$40:3E42`), counters drain it (`$40:5360`).
+- Threshold: byte `$50:5300 + type` (0 = revenge disabled). Trigger at `$40:36F9`: threshold − hate ≤ 0 → revenge, duration `$50:5500 + type` stored at record `+$105`. Tournament knight: type `$0B`, threshold 100.
+- Sprite object: screen x = obj`+$83` − camera X (`$7F:032A`); screen y = obj`+$87` − obj`+$8B` − (camera Y `$7F:032C` + 16) − 1 (roughly the sprite's centre).
+- Entity side byte (`+$01`): 1 = party, 2 = enemy, 4 = NPC (tournament guards).
+- Sprite builder (bank `$FD`, direct page `$0300`): shadow OAM `$7F:0100-$031F`; objects linked via obj`+$A7`; per-object draw `$FD:6E9B`; `$57` = next free OAM offset (bottom region, from entry 3 up), `$5F`/`$5D` = top region (from 127 down); `$FD:6E27` hides entries `$57..$59` left over from the previous frame. Hook point for extra sprites: just before `$FD:6E27`, append at `$57` and advance it.
+- OAM size mode 3: sprites are 16×16 or 32×32 (no 8×8).
+- Sprite VRAM in battle is almost full: only 16×16 blocks at tiles `$181` and `$182` are empty (tournament). Tiles `$1C8-$1CD` hold a tick-mark gauge graphic with empty tiles below (`$1D8-$1DF`).
+
+## Not tested yet
+
+- A party with more than one character (character switching in the equip screen). The prologue state only has Duran.
+- Shops and any other screen that might print `$FB:1855`.
+
+## Equip screen code (bank `$C4`, direct page = `$0500`)
+
+| Address | What |
+|---|---|
+| `$3E` (`$7E:053E`) | slot cursor index, 0-4 (0 = weapon and 2 = armor confirmed; 1 probably helm; 3-4 accessories) |
+| `$40` | saved slot index while the item list is open |
+| `$46` | screen mode; dispatched by `JSR ($86B7,X)` at `$C4:8252` |
+| `$7F:0129` | cursor sprite Y |
+| `$C4:8160` / `$C4:81B1` | slot cursor up / down handlers |
+| `$C4:84E9` | place cursor sprite (X = position table, e.g. `$C97A`) |
+| `$C4:85ED` | refresh after a slot move (reprints item list + equipped list) |
+| `$C4:82DF` | entering the item list (prints the help box) |
+| `$C4:9D8E` | draw a layout window (help box) via `$C4:4850` |
+| `$C4:4850` | layout printer: `JSL $C00730` reset window, then loop over entries at `[$4E]` |
+| `$C4:491E` | print one layout string: `LDA #$FB`, `JSL $C0073C`, then `JSL $C00740` per glyph |
+| `$C4:9D6E` | print an item name (Y = string address in `$FB`, X = window record) |
+| `$C4:9EE8` | item name lookup: index byte at `$0101,X`, table base from `$C4:B300 + Y` (Y = 0 or 2), name address = word at `$C4:(base + index*2)` |
+
+Layout entries (`[$4E],Y`): position byte, flag byte (`$61`), string address word (bank `$FB`).
+
+Text routine entries (`$C0:0730` table, set up by the translation):
+`$0730` → `$EAA1` reset window, `$073C` → `$EAC8` set string (A = bank, Y = address, X = record),
+`$0740` → `$EAFF` get next glyph, `$075C` → `$EADA` set string (variant).
+
+Free space in bank `$C4` (for small bridges back into `JSR`-only routines): `$C4:2306` (378 zero bytes, not verified unused), `$C4:4821` (47 bytes).
+
+## Test harness
+
+- `python tools/build.py` builds `build/som_desc.sfc` and `build/sinofmana_equip_descriptions.ips` from `src/main.asm` + `src/descriptions.txt`.
+- `python tools/make_desc.py --force` redrafts `src/descriptions.txt` from the ROM data (overwrites manual edits).
+- Applying: clean ROM → Sin of Mana main patch → `sinofmana_equip_descriptions.ips`. Difficulty and misc patches don't overlap it, so they can go before or after.
+- `python tools/run.py --from STATE steps...` runs the ROM headless in Mesen 2 (`third_party/mesen2`, portable settings, port 1 = SNES controller, Lua file access allowed).
+  - Steps: `a`, `b`, `y+b:4` (hold 4 frames), `a*5`, `w60`, `shot:NAME`, `save:NAME`, `dump:NAME` (128 KB WRAM), see `tools/run.py`.
+  - `--probe tests/probe_text.lua` logs every string printed; `tests/probe_cursor.lua` logs writes to the cursor.
+- Saved states in `build/states/`: `title`, `menu`, `newgame`, `pro1-3` (Duran prologue, Duran/Kevin/Hawk party), `mainmenu` (Y+B menu open), `equip` (EQUIP screen open).
+  - Main menu: right then up selects EQUIP, A opens it.
+- `tools/montage.py OUT.png IN...` stitches screenshots.
+
+## Free space
+
+- Large zero-filled runs in the expanded area, for example `$41:10FB` (~956 KB) and `$55:8A00` (~412 KB).
+- The difficulty patches only write `0x501DC1-0x501DC8`, and `super_happy_funtimes` writes `0x500001-0x500161`. Keep new code and text out of those ranges.
+
+## Menu speed (`src/menuspeed.asm` → `build/sinofmana_fast_menus.ips`)
+
+Main menu (Y+B) open/close, user's save (`build/states/field55.mss`: level-55 party at the ice cave save statue; `menu55` = menu open, `equip55` = EQUIP screen). The menu grid is directional: right = MGC, up then right (after the MGC screen has loaded) = EQUIP; each cell opens its screen as soon as the cursor lands on it, and input is ignored until it has loaded.
+
+Where the time went (Mesen, frames at 60/s):
+- Open (~165 frames, 2.75 s): field code waits 5 frames (`$D1:E520`), spawns the menu task `$C4:8C0C`; `$E8:C2AF` sends messages to tasks `[$7E:2001/2002/2007]` and waits up to 16 frames for a reply at `$E8:C406` (times out when opening, arrives after 4 frames when closing: left alone); fade-out `$C4:921D` (16 steps, 1 per frame); a 16-frame pause on black at `$C4:8CB6`; 5 calls of the tile decoder (`$E8:C484`, 8 KB each from `$CA:9B44`, ~9 frames of CPU each + ~5 frames of queued VRAM uploads); text and setup ~18 frames; fade-in `$C4:91F6` (15 steps).
+- Close (~130 frames, 2.1 s): fade-out, then the field reload: tile decoder, the doubled-pixel pass `$E8:C480` (~17 frames, no yields), the field decoder `$C2:3B87` (~39 frames over 15 calls), ~20 frames of general field setup in bank `$C2`, fade-in.
+- Inside the menu the CPU is mostly idle except for text: a slot move on the EQUIP screen is ~40 frames, nearly all in the translation's VWF renderer (`$C0:F070-F0A0`). Not changed yet.
+- Scheduler: cooperative tasks. Service table at `$C0:0400+` (`JSR svc : RTL` trampolines). `$C0:0450` → `$4E02` = wait for events A (bit 1 = next frame) with a timeout of X frames; the idle task is `$C0:4A14`.
+
+What the patch does:
+- Fades step 2 brightness levels per frame (fade-out: in place, `$C4:923F`; fade-in: `JSL FadeIn` at `$C4:91F6`, 1, 3, ... 15). 8 frames each instead of 15/16. Fade routines are shared (`JSR $91F6` from `$C4:8D2B/8DFB/8E26`, `JSR $921D` from `$C4:27EB/8C87`).
+- Pause on black before loading: 2 frames instead of 16 (`$C4:8CB7`). Nothing else runs during it (checked: no task work in those frames).
+- Decoders replaced (code at `$CB:F500-$CB:FB75`, `bars.asm` now stops at `$CB:F500`):
+  - `$E8:C484` tiles (`JML FastTiles`): per 8 bytes a control byte, MSB first, 1 = literal, 0 = zero byte; then each 4bpp tile's rows XORed with the row above (planes 0/1 and 2/3 separately, carried across tiles and calls in `$15/$17`). Waits a frame every 128 tiles like the original. Fast paths for control bytes `$00`/`$FF`.
+  - `$E8:C480` doubled pixels (`JML FastStretch`): 38 groups; mask byte at `($10)+$4C0+g*32+j` → `($10)+g*64+j` = high nibble doubled, `+32` = low nibble doubled; 256-byte tables instead of 8 ROLs per bit. Output overlaps the mask area by design; the order is kept.
+  - `$C2:3B87` field graphics (`JSL FastField : RTS`): control bit 1 = literal, 0 = the byte 2 back (starts as two zeros); the first group keeps the history in `$46/$48` like the original, later groups read it back from the output.
+  - Same results as the originals: output, every direct-page byte, A/X/Y and M/X on return (FastField even rebuilds the high byte of A that the original's last 16-bit read left). If the packed data is in WRAM (could overlap the output), or `$21` ≠ 0 for the tile decoder (the original's bit counter quirk), they fall back to a byte-by-byte copy of the original loop. `!ForceExact = 1` (asar `-DForceExact=1`) forces those paths for testing.
+- Verified with `tests/probe_decoders.lua` (logs every decoder call: inputs, changed direct-page bytes above the stack pointer, registers, checksums of the output and of 32 bytes on each side; set `DEC_TAG` in `build/probe_dec_cfg.lua`): identical logs on the old and new ROM for menu open/close (22 calls), a longer menu tour (grid, MGC, EQUIP, slot moves, item list), a walk through a map transition (14 calls), and with the byte-by-byte paths forced. Screenshots through the menu tour are pixel-identical. No decoder calls during battles.
+- Result: open 2.75 s → 1.70 s, close 2.18 s → 1.30 s (Mesen); on the Deck's Snes9x core from the user's state 4: open 2.75 s → 1.68 s, close 2.12 s → 1.27 s.
+- Probes used: `tests/probe_menu.lua` (per-frame timeline + screenshots, `build/probe_menu_cfg.lua` sets `SHOT_EVERY_G`/`SHOT_MAX_G`), `tests/probe_prof_menu.lua` (instructions by code page per button press), `tests/probe_hot.lua` / `probe_hot2.lua` (16-byte hot spots, frame window in `build/probe_hot_cfg.lua`), `tests/probe_buckets.lua` (per-frame decoder/text/idle split), `tests/probe_waits.lua` (wait-service calls with callers). `tools/deck_harness.py` step `lum:1` logs each frame's mean brightness on the Deck.
+- Inside the menu (added later the same day): submenu switches (the grid cells) were 0.83-1.35 s, an EQUIP slot move 0.63 s. A switch = prepare the new page off-screen (text, icons), then slide it in.
+  - Text engine (`$C0:ECF6` per character, DB = `$7E`): copy the 15 font rows ($FE:5600 + char*16) into a 3-byte-per-row shift buffer `$7E:3090` (loop `$C0:ED4D`), optionally widen/shift, then per 8-pixel column draw 8 rows twice with the drop shadow into `$7E:3400+$3088` (`$C0:F075`: plane 1 = the row, plane 0 = h(r) | h(r-1), h = row | row>>1 with the left byte's last pixel). Per character (Mesen master clocks): load 3,677, shadow rows 12,048, next-character fetch 2,205. `TextLoad` (unrolled copy) and `TextRows` (8 unrolled rows, each shadow computed once) give the same bytes: 3,244 and 7,763. Only the plain overwrite case (`$C0:F07A`) is replaced; the OR/style variants (`$F008/$F03E/$F0A8`) are unchanged.
+  - The real limit was the upload: `$C4:9840` queued each finished line from `$7E:3400` as a DMA job with "notify" (type `$11`) and waited for its message, so menus drew one line per frame. `TextUpload` copies the line (MVN) to a heap block (`$C0:0500`) and queues it as type `$09` ("free source"), without waiting. After 4 such lines it pauses a frame (`TextCount` at `$7E:2BD0`), because the system only frees the blocks when the task is resumed. No block (or 0 bytes): the original way.
+  - DMA jobs (`$C0:0560` alloc, `$C0:0568` queue; records in bank `$7F`): `+$04` source, `+$06` bank, `+$07` size, `+$0B` VRAM, `+$0E` owner task (`$7F:008C` at alloc), `+$0F` type: low 3 bits = handler, `$08` = when done send the owner a "free this block" message (system class 1, handled by the scheduler when the owner resumes: `$C0:4B16` -> `$4F41` -> `$5CEC` -> heap free `$C0:5C4D`), `$10` = send the owner a class-4 "done" message. All queued jobs run in the next NMI (`$C0:2278`, RTS chain from `$7F:1D00`). Budget: each job adds `$36 + size` to `$7F:0010`; `$E8:CCF7` waits while `$7F:0010 + A >= $1758`. Heap alloc (`$C0:5869`) returns X = 0 when full.
+  - Page slide (`$E8:CD6D`): 32 steps of 8 px with sprites moved along (`$E8:CF49/CEB2`) and the cursor nudged every other step (`$E8:CFCA`). Now 16 steps of 16 px (speeds at `$E8:CD19/22/2F/38`, count at `$E8:CD98`).
+  - Icons (`$C4:4D77`, via the graphics task `$7E:2000`, `$C1:D916` -> `$C1:D96A`): after each icon the menu waited a frame; now it only waits if the next icon's uploads would not fit the DMA budget. That exposed a latent bug: the icon's quarters were queued with the "free" flag on the first job, so an NMI between the jobs freed the buffer early and the next icon reused it (half of one MGC icon showed another). `IconJobs4`/`IconJobs2` (`$C1:D9DF`, `$C1:DA8D`) queue the block-start job, which carries the free, last.
+  - Verified: `tests/probe_textcheck.lua` (every character's buffer and every tile column with registers; old and new logs identical: 1,849 characters / 4,246 columns, and a full EQUIP flow of 6,095 lines), screenshots of every grid page and EQUIP step pixel-identical to the original (also at 4 different timings), `tests/probe_heap.lua` (184 text blocks taken and freed in a long soak, at most 5 held, no failed allocations, nothing else writes `$7E:2BD0`).
+  - Result (Mesen, original -> now): MGC 0.98 -> 0.53 s, EQUIP 1.35 -> 0.80, INV 1.20 -> 0.78, WIN 1.28 -> 0.70, BTL 0.83 -> 0.48, FILE 1.00 -> 0.67, STAT 0.97 -> 0.58, CON 0.98 -> 0.58; EQUIP slot move 0.63 -> 0.40 s.
+  - On the Deck (Snes9x core, user's state 4, `deck_harness.py` with `lum:1`): open menu 2.75 -> 1.58 s, MGC page 0.97 -> 0.52 s, EQUIP page 1.33 -> 0.78 s, close ~2.1 -> 1.27 s; all settled screens pixel-identical to the original. (Brightness-based timing can't resolve small text changes such as slot moves.)
+  - Probes: `probe_equipsteps.lua` (per frame: characters drawn, icons, waits), `probe_lines.lua` (the strings drawn), `probe_glyphcost.lua` (clocks per character phase), `probe_yield.lua` (who yields to the scheduler, with return addresses), `probe_iconjobs.lua` (icon buffers and NMIs while queuing).
+- Side note (fixed 2026-11-02, see "Steady marks" above): the HUD buff icons flickered with the game's HUD palette cycle.
+
+## Level-up info panel (`sinofmana_levelup_info.ips`, 2026-11-03)
+
+User: show the capstones in game ("so I don't have to go back to the reference doc while I'm building my characters"), also "what the stats actually DO"; capstone info only when the character is in the class it applies to (final class) and never after Lv60.
+
+- Capstones (README "Capstone", `classes_capstones.txt`): at the level-up to 60 the highest stat (ties: the upper one, STR AGL VIT INT PIE LUK) picks one of 6 per character. Mod code `$40:7A10` (called from the level-up routine `$D0:DF7B`, `($34)` = record + `$90`): increments the level (record `+$B1`, 0-based: 54 = L55); from 59 on, unless record `+$C8` is set: finds the max of `+$96..+$9B`, stores `$F5+n` (n = 1 STR .. 6 LUK) in record `+$150` and effect id `$50:4E40[char*8+n]` in `+$C8` (the ids are shared between characters with the same effect). Below 59 it clears `+$C8`. The names "STR Capstone" .. are `$53` slots `$C1-$C6` (redirects of `$FB:1E77-1E7C`); no menu reads `+$150`/`+$C8` (checked: STAT, EQUIP).
+- Record fields used: `+$B3` character (0 Duran, 1 Kevin, 2 Hawk, 3 Angela, 4 Carlie, 5 Lise; also `+$90 & 7`), `+$B4` class tier (0 base, 1 second, 2 final), `+$B5` path (second class: 0 light, 1 dark; final: 0-3 = LL LD DL DD, e.g. Duran Lord 1, Angela Rune Master 2; Kevin's DL is Death Hand, DD Dervish, the reverse of the doc's order), `+$B1` level - 1, `+$145..+$150` known spell ids (0 ends) with their target types at `+$151..`, `+$16F` the party's Mana Spirits (bits; `$00` at the start, `$3B` at Deen, `$FF` all), `+$96..+$9B` STR AGL VIT INT PIE(Spirit) LUK, `+$9D/+$9F` EXP words compared with the next-level table (high word first).
+- The level-up stat window is BG3 text in the HUD font (rows 6-21, columns 1-16): frame tiles `$040-$047` (corners `$040/$042/$045/$047`), "Lord" (class) on row 8, the six stats on rows 10, 12 .. 20 (name from column 2, value in columns 14-15, small digits `$080-$089`), the highlighted one in palette 3 showing value + 1. The ring of "+1 STR/CON/DEX/INT/PIE/LUC" sprites turns with left/right; A asks "Are you sure you want to raise X?" (Yes/No, a message window). While the window is up the level byte is still the old level, so the pick at the level-up to 60 still counts for the capstone.
+- `LevelPanel` (`$58:0000`, bank `$58` is free in the base ROM; called from Bars every frame): finds the window (corners + the six first letters), the highlighted stat (palette 3; none for a frame while the game redraws the rows: keeps the last one), the character (the party record whose stats match the window's values, the highlighted one left out). Panel: 5 rows x 30 cells over the top HUD: rows 1-2 = what the stat does (README "Character Stats", condensed), row 3 = the spell line (below), rows 4-5 = "Lv60 if highest:" / "Lv60 (on track):" + the character's capstone for the stat, only if `+$B4` = 2, `+$B1` <= 58 and `+$C8` = 0. "On track" = with this +1 the stat is the one `$40:7A10` would pick. Stat name in red (`!RedPal`: palette 3, or 5 when borrowed), label green (palette 1), text white (palette 4).
+- Drawing: rows 1-4 go into the off-screen BG3 rows 28-31 (no bars meanwhile; the battle is paused) and the HDMA table (channel 1) shows them on lines 8-39 (VOFS 215); row 5 is drawn in place (BG3 row 5, empty above the window) and blanked afterwards. So the HUD rows are never touched: when the window closes (missing 4 frames in a row) the band stops and the HUD is back as it is. The HUD portraits are OAM entries 0-2 (shadow OAM `$7F:0100`, written once by the HUD; the sprite builder allocates from entry 3), in any order (the user's state 4: entry 0 top right, 1 top left, 2 bottom): those on the panel's lines are hidden (Y = `$F0`) while the panel is up and put back after (`!SprSave` entries 1-2, `!SprSave0` entry 0, `!SprHid` bits). The NMI keeps the panel's table for up to 15 frames without a rebuild (the game skips Bars for a few frames at a time while the ring turns; bars still need a table built within 2 frames).
+- Spell line (2026-11-03, user: "Spell unlocks"): "Learns Ice Saber now!", "Next: Speed Down* at 22 (+k more)", "All AGL spells reached", "No STR spells in this class", "Next INT spell needs a spirit", "Spell list full (10 known)". `LvSpells` reads the game's own level-up table at run time, as the game does (traced at the INT 14 -> 15 level-up, Ice Saber learned): the routine at `$D0:DFEA` / `$E007` / `$E02B` (base / second / final) reads 6 / 11 / 12 four-byte entries at `$D1:BCC0` + `char*$18` / `$90 + (char*2 + path)*$2C` / `$2A0 + (char*4 + path)*$30` (no class reads into the next list); entry = target type (1 one, 2 all `#`, 3 one or all `*`, 4 self `^`, 0 none), `stat << 5 | value` (stat 1 STR .. 6 LUK; 0 = given with the class, no stat), the spell it replaces (or 0), spell id. Per entry (`$D0:E06B`): stat >= value; spirit bit `$50:1400[spell]` (0 = none needed, `$C0` counts as `$20`) in record `+$16F` (`$40:0CD0`); then the known list: a free slot = new spell, the same spell = only if the type is higher, the spell it replaces = yes (`$40:1420`, `$40:1440`, e.g. Angela's Delvar list turns Airblast into Thunderstorm). With 10 spells known (`+$14E` set) the hook `$40:6BE0` makes the game read character 0's empty base list: nothing is learned. The panel's "next" is the lowest threshold above the stat among entries that would teach something and whose spirit has joined; "(+k)" counts the others (shown when it fits). Names by spell id: `SPELL_NAMES` in `tools/make_levelinfo.py` (the doc's names, matched to the ids by `tools/check_spells.py`).
+- The reference doc vs the game's table (`python tools/check_spells.py`): Hawk Ranger has Sleep Flower at INT 10 and Body Change at 11 (doc: the reverse); Hawk Ninja Master teaches Poison Bubble at STR 20 (doc: Sleep Flower); Charlie Sage's Saint Beam* is at SPI 17 (doc: 19); Charlie Evil Shaman's Demon Breath is all-target `#` (doc: `*`). The panel shows the game's.
+- The game redraws the level-up window about every 30 frames: for ~5 frames the record itself holds the highlighted stat + 1 (`$C4:192E`, a script store), the names, digits and highlight go blank and come back row by row; the window's own value of the highlighted stat is always the stat + 1 (even at the class's stat cap, which only blocks the Yes). Before 2026-11-03 the panel read the stat from the record (the capstone label flipped "if highest" <-> "on track" for a few frames, the spell line could too) and, on Snes9x, lost the window for 4 frames in a row and closed for a frame (the HUD showed through: the flicker the user saw on the Deck). Now: the stat is the window's value - 1 (`!PanelVal`), only a whole, settled window is read (all six values digits, a stat highlighted, a party member matching), any other frame keeps the panel as it is; frame corners there but not the names = being redrawn: kept up to 16 frames (`.redraw`); no frame: closes after 4.
+- Punctuation the font lacks (`: , . / % ( ) & = * # ^`) is drawn in its style (`tools/make_bargfx.py` `GLYPHS`, tiles `$0DD-$0E8`, sent with the bar tiles; also when the panel opens). Texts: `tools/make_levelinfo.py` -> `build/levelinfo.asm` (tile numbers; checks every text fits).
+- Bottom line: screen line 223 shows BG3 line 224 (row 28) with scroll 0, so the bars' and the panel's top pixel row showed as a 1-pixel strip at the very bottom; every table now ends with a 1-line entry with VOFS -1 (row 27, blank) at line 223 (`EmitLastLine`).
+- Checked on the Deck (Snes9x, `deck_harness.py`): the user's own state 4 (saved 2026-11-03 at Angela's L55 -> 56 stat window, Rune Master): Strength -> Angela's STR capstone, Luck -> "if highest: weapons use LUK...", Spirit 24 -> "on track: +7 p.def/m.def...", Intelligence 23 -> "on track: pierce 35 m.def" (ties Spirit 23, the upper stat wins), Yes -> window closes, L56, HUD and portraits back; state 1 (inn) with buffs: HUD cells identical for 16 frames, bottom line clean. State 4 was made with `0e1ab488`: no position in moved code (main code in the scheduler, NMI in the game's handler), panel RAM zero.
+- Checked (Mesen, `tests/probe_panel.lua`, `tests/probe_panelvis.lua`, level-up state `build/states/lvup.mss`: Duran Lord L55 -> 56 in the ice cave, made by giving EXP `+$9D` = `$00FF` and enemies 1 HP): Strength -> "Lv60 if highest: enemies spawn with -15 p.def and m.def"; Agility -> "Lv60 (on track): saber spells add 20% attack instead of 10% (party)" (all 5 rows); panel steady through the ring turning and the Yes/No question, then gone, HUD and portraits back, stat applied; second class (`+$B4` = 1), L60 (`+$B1` = 59) or capstone set (`+$C8` != 0): stat text only; L59 -> 60: capstone shown; Angela's / Lise's texts index right; patch alone: works, palette 1 steady, red name in the borrowed palette 5 while a member is down; bars/icons/arrows unchanged (staged battle), window open/close with borrowing: no wrong frame.
+- Checked, spell line and flicker fix (2026-11-03). Mesen, `lvup` state, Duran Lord STR 21 AGL 23 VIT 18 INT 14 SPI 18 LUK 14: "No STR spells" / "All AGL spells reached" / "No VIT spells" / "Learns Ice Saber now!" (confirmed: INT 15 adds spell `$12`) / "Next: Speed Down* at 22" / "Next: Arrows at 16 (+2)"; pokes: 10 known -> "Spell list full" for INT, SPI, LUK; spirits `$FB` (no water) -> INT "Next: Protect Up* at 19 (+1)"; `$BA` -> "Next INT/SPI spell needs a spirit", LUK still Arrows; Knight -> "All INT/SPI reached", no capstone rows; L60 -> spell line only; 8 other classes (Kevin DL/DD, Angela, Charlie, Hawk, Lise) x 6 stats = 48 lines identical to a Python model of the game's rules. Every frame for 380 frames idle and through two ring turns (`tests/probe_flicker.lua`): panel signature changes once per turn, the panel area otherwise only shows the game's "+1" arrow sprite moving. Deck (Snes9x, `deck_harness.py` `every:1`), the user's state 4 (Angela Rune Master): old build `118576ae` lost the panel for a frame at frame 26 (HUD showing), new build: panel held for 100 idle frames, one change at the ring turn (Luck: "Next: Diamond Saber* at 19"). Shop sell ring, stand-in buy ring, bars (`probe_blip`: 0 wrong frames), equip help box: unchanged.
+
+## Shop descriptions (`sinofmana_shop_descriptions.ips`, 2026-11-03)
+
+User: "is there any way we can get the equipment description when you're in the buy menu as well?"
+
+- Shops: talk to the merchant -> "Welcome." + Buy / Sell / End. Buy and sell are a ring of item icons around the party; a one-line message window on top shows "name  price Luc  hint" (hint: the class a class-change item gives, "x1" counts when selling). BG3 boxes: buy = "Owned: n" (frame rows 8-13, columns 1-8, "Owned" on row 10); sell = a category list (Item / Weapon / Helmet / Armor / Ring ...: frame rows 8-15, columns 1-10, arrows `$02E`/`$02D`/`$02F` at column 2 of rows 10/12/14); Luc box rows 18-20. The bar comes from a bytecode script (VM at `$C4:0816+`, program around `$D3:0A8E`; item names from `$D3:9B36 + 2*idx`, hints from `$D3:A158`) printed through `$C4:7287` -> `$C0:EADA` (so through the mod's redirect hook): the name first, then the price piece `$FB:4687`, then the hint. The name is printed before the box appears (12 frames).
+- Item name strings: equipment `$FB:1C6C-$2D5x` (tables `$C4:B31E`/`$C4:B51E`, 592 entries, all redirected to `$53` slots); other items `$FB:2D91-$2DA2` and `$3006-$3394` (table `$D3:9B36` / `$C4:B938`). Deen's shop (save slot 2, `build/states/shop_buy`) sells only the mod's class-change items (Gleipnir, Knight Dragon Chain, Bottle of Salt, Holy Water Vial, Bad / Good Luck Die, 3480 Luc); equipment shops are in Wendel / Byzel / Pedan (README "Extra Shop location").
+- `ShopNote` (`src/main.asm`, called by `NewRedirect` for every `$FB` string): equipment name -> `!ShopDesc` (`$7E:28F0`) = `DescTable[slot]` (0 if none), other item name -> 0, stamp `$7E:28F2` = `$7F:00C6`; other strings untouched.
+- `LevelPanel` (now both panels): if no level-up window, `LvFindShop` looks for either box; with a description (fresh, within 120 ticks, when the panel opens) the panel shows it on rows 2-3 (BG3 rows 29-30, all 32 columns: line 1 is up to 32 characters), converted from the description's ASCII with `LvAscii` (`tools/make_levelinfo.py`; glyphs `&` `=` added, `$0E4/$0E5`). A box with no description (a plain item) closes the panel at once; the box missing closes it after 4 frames and forgets the note.
+- Checked (Mesen): Deen sell ring, real data: Weapon "L1 Tech UP" -> "Atk 10 Dly 58 Hit 5 Crit 0/+10 / Lv1 tech +20, counter +25", Helmet "Phys. Defense" -> "Physical defense up / Def +7", Armor "Exp UP" -> "Def 7/5 Eva 0 CrRes 15 HP100% / Party gains +25% experience", Ring "Critical Guard" -> "Halves enemy crit rate"; Item category (Magical Rope): no panel; back to Weapon: panel again. Buy ring with a stand-in (`tests/probe_fakeshop.lua` hands two real descriptions to the class items): panel above the bar, follows the ring, gone after B ("Anything else?"). Field ring menu: no panel; level-up panel, equip help box, bars/borrowing: unchanged. Not seen yet: an equipment shop's buy ring (no save near one); if it has neither box the panel won't show there.
+
+## Steam Deck ROM ("Sins of ManaNORMAL Plus.sfc")
+
+- Built from the user's own ROM `build/deck/Sins of ManaNORMAL.sfc` (2.060 + Normal difficulty + bonus fight, MD5 `457fe6dc…`) + `sinofmana_equip_descriptions.ips` + `no_popup_messages_fixed.ips` + the seven bar feature patches (incl. `sinofmana_levelup_info.ips`, `sinofmana_shop_descriptions.ips`) + `sinofmana_fast_menus.ips` (`python tools/deckrom.py` after `tools/build.py`). They apply to identical original bytes and never disagree where they overlap (the bar patches share their engine). Current build: MD5 `f328a900…` (+ the cast bar follows the cast's own timer, see "Cast timing"), on the Deck since 2026-11-04 (states 4 and 5: no return address into bank `$CB`; state 4 level-up panel and field checked there). Earlier: MD5 `c4c1f3c5…` (+ the icon palette guard, see "Garbage room tiles after the equip screen"), on the Deck from 2026-11-03 13:31 (checked there: the user's state 4 -> level up -> EQUIP -> slot cursor help text -> field, block table intact; states 4 and 5 hold no position in moved code: both in the game's NMI, main code in the scheduler). Earlier builds kept in `/home/deck/Emulation/saves/sinofmana-backup-2026-11-02/previous-roms/`: `c4c1f3c5…` (icon palette guard), `da9ad711…` (+ the level-up panel's spell line, its flicker fixed), `118576ae…` (+ shop descriptions), `61159d48…` (+ level-up info panel), `0e1ab488…` (steady buff/debuff colours, both enemy arrows at once), `ce285e20…` (bar features split + equip description fix). (`eda740f9…` was on the Deck for 15 minutes: top-right portrait showed through the panel when the HUD had put it in OAM entry 0.)
+- Deck paths: ROMs `/home/deck/Emulation/roms/snes/Hacks/`, Steam RetroArch states/saves under `/run/media/deck/1fb496c3-…/steamapps/common/RetroArch/`, backup of the original saves in `/home/deck/Emulation/saves/sinofmana-backup-2026-11-02/`.
+- RetroArch there: auto-load state off, auto-save on (closing the game writes `.state.auto`).
+- Core: Snes9x (`snes9x_overclock_cycles` off). Per-game override `config/Snes9x/Sins of ManaNORMAL Plus.cfg` (added 2026-11-02 for input delay): run-ahead 2 frames with a second instance, 2 swapchain images. The game reacts on the frame after the joypad read and shows it the frame after that (2 frames, measured in the field).
+- Slowdown: skipped game frames (sprite builder not run) don't change with 38% more CPU per frame or a longer vblank in Mesen, so Snes9x's "Reduce Slowdown" overclock wouldn't help; spell effects run at a reduced rate by design (~31% skipped frames in spell spam).
+- Repro state for the black-screen bug: `build/states/icecave.mss` (Mesen), then `select w15 select w15 down:12 right:6 a`.
