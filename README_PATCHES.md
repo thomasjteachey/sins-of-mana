@@ -23,7 +23,7 @@ Pick any mix and apply in any order. Only one combination has a requirement:
 | `sinofmana_party_buff_icons.ips` | Buff / debuff icons beside each party member's HUD. |
 | `sinofmana_levelup_info.ips` | At the level-up stat choice, a panel shows what the highlighted stat does, the next spell it unlocks in the current class, and the character's Lv60 capstone for it. |
 | `sinofmana_shop_descriptions.ips` | The equipment descriptions in a shop's buy / sell ring, in the same top panel. |
-| `sinofmana_enemy_weaknesses.ips` | While you pick a target, the lines under the target bar list the enemy's weak and resisted elements (weak / drain / repel / void / half). |
+| `sinofmana_enemy_weaknesses.ips` | While you pick a target, the lines under the target bar list the enemy's weak and resisted elements (weak / drain / repel / void / half), read from the game's own data for that enemy, bosses included. |
 
 The eight bar / panel patches share one engine: each carries all of it plus its own
 on/off switch, so they never conflict with each other.
@@ -38,4 +38,3 @@ on/off switch, so they never conflict with each other.
 ## Credits
 
 Made by ttopper, written with Claude (Anthropic's AI assistant). Sin of Mana by Praetarius5018.
-Enemy weakness data from the mod's `monster_bosses.xls`.

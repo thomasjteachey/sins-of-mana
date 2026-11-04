@@ -133,7 +133,7 @@ FeatWeakness  = $CBF4FE
 !WeakRec  = !Ram+$0F6        ; target picker up: record whose name it printed (0 = not up)
 !WeakDP   = !Ram+$0F8        ; direct page of the text task that printed it
 !WeakX    = !Ram+$0FC        ; where that text ended (D+$28) once printed ($FFFF: not noted yet)
-!WeakOn   = !Ram+$0FA        ; enemy type + 1 listed under the target bar (0 = none)
+!WeakOn   = !Ram+$0FA        ; record whose elements are listed under the target bar (0 = none)
 !RowBusy  = !Ram+$0C0        ; byte per BG3 row: nonzero = the game shows text there
 !TableA   = !Ram+$100        ; HDMA tables (<= 100 bytes each)
 !TableB   = !Ram+$180
@@ -3321,8 +3321,10 @@ LvLastLine:                  ; = EmitLastLine (that one is in bank $CB)
 incsrc "../build/levelinfo.asm"
 
 
-; Enemy weaknesses. While the player picks a target, rows 8-10 under the target bar
-; list the targeted enemy's weak and resisted elements (texts: tools/make_weakinfo.py).
+; Enemy weaknesses. While the player picks a target, rows 8-11 under the target bar
+; list the targeted enemy's weak and resisted elements, read from its own record
+; (+$D1 repel, +$D2 drain, +$D3 void, +$D4 half, +$D5 weak: a bit per element, bit 0-7 =
+; earth, air, water, fire, dark, holy, moon, leaf; words: tools/make_weakinfo.py).
 ; WeakName runs in the text op that prints a monster's name, which the target bar
 ; uses for each enemy the cursor lands on: it notes the record and the text task.
 ; The first frame after, WeakWhich notes where the bar's text ended (the task's D+$28:
@@ -3341,7 +3343,7 @@ WeakName:                    ; X = the monster's record, D = the text task
 	ASL
 	RTL
 
-; Called from Bars every frame (16-bit A/X/Y, DB = $7F). Carry set: rows 8-11 changed.
+; Called from Bars every frame (16-bit A/X/Y, DB = $7F, D = Bars' locals). Carry set: rows 8-11 changed.
 WeakPanel:
 	LDA.l FeatWeakness
 	BMI .no
@@ -3363,7 +3365,7 @@ WeakPanel:
 	CLC
 	RTL
 
-; A = enemy type + 1 to list, 0 = none.
+; A = record of the enemy to list, 0 = none.
 WeakWhich:
 	LDA.l !WeakRec
 	BEQ .none
@@ -3383,12 +3385,6 @@ WeakWhich:
 	STA.l !WeakX
 .show
 	LDA.l !WeakRec
-	TAX
-	LDA.l $7F0090,X
-	AND.w #$01FF
-	CMP.w #WeakCount
-	BCS .none
-	INC
 	RTS
 .stop
 	LDA.w #$0000
@@ -3397,59 +3393,297 @@ WeakWhich:
 	LDA.w #$0000
 	RTS
 
-; Blank BG3 rows 8-10, then write the text of enemy type A-1 there (A = 0: blank only).
+; Blank BG3 rows 8-11, then list the elements of record A there (A = 0: blank only).
+; "Weak" fills row 8 ("none" if empty), the resistances start on row 9 and wrap at 30
+; cells; 6+ elements show as "all but ...". Locals: $01 cell offset, $03 row offset,
+; $05 palette bits, $07 cells used in the row, $09 mask, $0B list mode, $0D items left,
+; $0F segment length, $11 category, $13 record, $15 out of rows, $17 start a new row,
+; $19 bit, $1B items written, $1D name / mask, $21 string length.
 WeakDraw:
-	PHA
+	PHB
+	PHK
+	PLB                      ; DB = this bank (the words)
+	STA $13
 	LDX.w #8*64
 	LDA.w #$00FF
 -	STA.l !Shadow,X
 	INX
 	INX
-	CPX.w #11*64
+	CPX.w #12*64
 	BNE -
-	PLA
-	BEQ .rts
-	DEC
-	ASL
-	TAX
-	LDA.l WeakPtr,X
-	STA $01
-	LDA.w #WeakPtr>>16
+	LDA $13
+	BEQ .done
+	LDA.w #8*64
 	STA $03
-	LDA.w #$3000             ; white
-	STA $05
-	LDY.w #$0000
-	LDX.w #(8*64)+2          ; row 8, column 1
-.next
-	LDA [$01],Y
-	INY
+	INC
+	INC
+	STA $01
+	STZ $07
+	STZ $15
+	STZ $17
+	STZ $11                  ; Weak, always
+	LDX $13
+	LDA.l $7F00D5,X
 	AND.w #$00FF
-	BEQ .rts                 ; $00 end
-	CMP.w #$0004
-	BCS .tile
-	CMP.w #$0001
-	BNE .pal
-	TXA                      ; $01 next line, column 1
-	AND.w #$FFC0
-	CLC
-	ADC.w #64+2
-	TAX
-	BRA .next
-.pal
-	CMP.w #$0002             ; $02 green (palette 1), $03 white (palette 4)
+	JSR WeakSeg
+	LDA.w #$0001
+	STA $17                  ; the first resistance starts a new row
+	LDY.w #$00D2             ; Drain
+	JSR WeakCat
+	LDA.w #$0002             ; Repel, minus what it drains
+	STA $11
+	LDX $13
+	LDA.l $7F00D1,X          ; low byte repel, high byte drain
+	STA $0D
+	XBA
+	EOR.w #$FFFF
+	AND $0D
+	AND.w #$00FF
 	BEQ +
-	LDA.w #$3000
-	BRA ++
-+	LDA.w #$2400
-++	STA $05
-	BRA .next
-.tile
-	ORA $05
-	STA.l !Shadow,X
-	INX
-	INX
+	JSR WeakSeg
++	LDA.w #$0003
+	LDY.w #$00D3             ; Void
+	JSR WeakCat
+	LDA.w #$0004
+	LDY.w #$00D4             ; Half
+	JSR WeakCat
+.done
+	PLB
+	RTS
+
+; A = category (Drain: 1 is set by the caller), Y = record offset of its mask.
+WeakCat:
+	CMP.w #$0003
+	BCC +
+	STA $11
++	CPY.w #$00D2
+	BNE +
+	LDA.w #$0001
+	STA $11
++	TYA
+	CLC
+	ADC $13
+	TAX
+	LDA.l $7F0000,X
+	AND.w #$00FF
+	BEQ +
+	JSR WeakSeg
++	RTS
+
+; One "Label: items" segment: A = mask, $11 = category.
+WeakSeg:
+	STA $09
+	STZ $0D                  ; elements in the mask
+	LDX.w #$0008
+-	LSR
+	BCC +
+	INC $0D
++	DEX
+	BNE -
+	LDA $0D                  ; $0B: 0 list them, 1 "all but" the others,
+	BNE +                    ; 2 "none", 3 "all"
+	LDA.w #$0002
+	BRA .mode
++	CMP.w #$0008
+	BNE +
+	LDA.w #$0003
+	BRA .mode
++	CMP.w #$0006
+	LDA.w #$0000
+	BCC .mode
+	INC
+.mode
+	STA $0B
+	CMP.w #$0001
+	BNE +
+	LDA $09                  ; "all but": list the missing ones
+	EOR.w #$00FF
+	STA $09
+	LDA.w #$0008
+	SEC
+	SBC $0D
+	STA $0D
++	JSR WeakSegLen
+	LDA $17                  ; where it goes
+	BEQ .fit
+	STZ $17
+	JSR WeakNewRow
+	BRA .label
+.fit
+	LDA $07
+	BEQ .label
+	CLC
+	ADC $0F
+	ADC.w #$0002
+	CMP.w #31
+	BCC +
+	JSR WeakNewRow
+	BRA .label
++	LDA.w #$00FF
+	JSR WeakPut
+	LDA.w #$00FF
+	JSR WeakPut
+.label
+	LDA.w #$2400             ; label green (palette 1)
+	STA $05
+	LDA $11
+	ASL
+	ASL
+	ASL
+	CLC
+	ADC.w #WeakLabels
+	TAY
+	JSR WeakStr
+	LDA.w #$3000             ; the rest white (palette 4)
+	STA $05
+	LDA $0B
+	CMP.w #$0002
+	BNE +
+	LDY.w #WeakNone
+	JMP WeakStr
++	CMP.w #$0003
+	BNE +
+	LDY.w #WeakAll
+	JMP WeakStr
++	CMP.w #$0001
+	BNE +
+	LDY.w #WeakBut
+	JSR WeakStr
++	STZ $19                  ; list the bits of $09
+	STZ $1B
+.next
+	LDA $19
+	CMP.w #$0008
+	BCS .rts
+	LSR $09
+	BCC .skip
+	DEC $0D                  ; items after this one
+	LDA $19
+	ASL
+	CLC
+	ADC $19
+	ASL
+	CLC
+	ADC.w #WeakNames
+	STA $1D
+	TAY
+	LDA $0000,Y
+	AND.w #$00FF             ; its length (+1 for the comma)
+	LDX $0D
+	BEQ +
+	INC
++	LDX $1B
+	BEQ .put                 ; the first one follows the label
+	SEC                      ; + the space before it
+	ADC $07
+	CMP.w #31
+	BCC +
+	JSR WeakNewRow
+	BRA .put
++	LDA.w #$00FF
+	JSR WeakPut
+.put
+	LDY $1D
+	JSR WeakStr
+	INC $1B
+	LDA $0D
+	BEQ .skip
+	LDA.w #WeakComma
+	JSR WeakPut
+.skip
+	INC $19
 	BRA .next
 .rts
 	RTS
+
+; $0F = cells of the segment: label + items (names, ", " between, "all but " first).
+WeakSegLen:
+	LDA $11
+	ASL
+	ASL
+	ASL
+	TAY
+	LDA WeakLabels,Y
+	AND.w #$00FF
+	STA $0F
+	LDA $0B
+	CMP.w #$0002
+	BNE +
+	LDA.w #$0004             ; none
+	BRA .add
++	CMP.w #$0003
+	BNE +
+	LDA.w #$0003             ; all
+	BRA .add
++	CMP.w #$0001
+	BNE +
+	LDA.w #$0008             ; "all but "
+	CLC
+	ADC $0F
+	STA $0F
++	LDA $09
+	STA $1D
+	LDX.w #$0000
+-	LSR $1D
+	BCC +
+	LDA WeakNames,X
+	AND.w #$00FF
+	CLC
+	ADC $0F
+	ADC.w #$0002
+	STA $0F
++	TXA
+	CLC
+	ADC.w #$0006
+	TAX
+	CPX.w #6*8
+	BNE -
+	LDA.w #$FFFE             ; no ", " after the last
+.add
+	CLC
+	ADC $0F
+	STA $0F
+	RTS
+
+WeakNewRow:
+	LDA $03
+	CLC
+	ADC.w #64
+	STA $03
+	CMP.w #12*64
+	BCC +
+	INC $15                  ; out of rows: write no more
++	LDA $03
+	CLC
+	ADC.w #$0002             ; column 1
+	STA $01
+	STZ $07
+	RTS
+
+; Y = string (length byte, tiles) in this bank.
+WeakStr:
+	LDA $0000,Y
+	AND.w #$00FF
+	STA $21
+-	INY
+	LDA $0000,Y
+	JSR WeakPut
+	DEC $21
+	BNE -
+	RTS
+
+; A = tile (low byte), in palette $05, at the next cell.
+WeakPut:
+	LDX $15
+	BNE +
+	AND.w #$00FF
+	ORA $05
+	LDX $01
+	STA.l !Shadow,X
+	INX
+	INX
+	STX $01
+	INC $07
++	RTS
 
 incsrc "../build/weakinfo.asm"

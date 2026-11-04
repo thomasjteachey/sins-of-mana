@@ -25,7 +25,7 @@ The eight bar / panel patches (`sinofmana_revenge_bar.ips`, `sinofmana_enemy_buf
 | `$CB:E400-F4EF` | free | `$CB:E400-F3B6` (3925 bytes) | yes ($FF) | engine code: bars, HUD buff icons, NMI part (FastROM) |
 | `$CB:F4F0-F4FF` | free | `$CB:F4F0-F4FF` (16 bytes) | yes ($FF) | feature switches, one word each: `$FFFF` off, `$0000` on (table below) |
 | `$56:A000-FFFF` | free | `$56:A000-A239` (503 bytes) | yes ($00) | engine code: `CastStart`, `PulseFix`, cast timing |
-| `$58:0000-FFFF` | free | `$58:0000-2484` (8832 bytes) | yes ($00) | info panels (level-up, shop, enemy weaknesses): code and texts |
+| `$58:0000-FFFF` | free | `$58:0000-1C46` (6723 bytes) | yes ($00) | info panels (level-up, shop, enemy weaknesses): code and texts |
 
 Feature switches:
 
@@ -89,14 +89,14 @@ Feature switches:
 | `sinofmana_equip_descriptions.ips` | 10495 |
 | `no_popup_messages_fixed.ips` | 33 |
 | `sinofmana_fast_menus.ips` | 2592 |
-| `sinofmana_revenge_bar.ips` | 13287 |
-| `sinofmana_enemy_buff_markers.ips` | 13287 |
-| `sinofmana_party_cast_bar.ips` | 13287 |
-| `sinofmana_enemy_cast_bar.ips` | 13287 |
-| `sinofmana_party_buff_icons.ips` | 13287 |
-| `sinofmana_levelup_info.ips` | 13287 |
-| `sinofmana_shop_descriptions.ips` | 13287 |
-| `sinofmana_enemy_weaknesses.ips` | 13287 |
+| `sinofmana_revenge_bar.ips` | 11178 |
+| `sinofmana_enemy_buff_markers.ips` | 11178 |
+| `sinofmana_party_cast_bar.ips` | 11178 |
+| `sinofmana_enemy_cast_bar.ips` | 11178 |
+| `sinofmana_party_buff_icons.ips` | 11178 |
+| `sinofmana_levelup_info.ips` | 11178 |
+| `sinofmana_shop_descriptions.ips` | 11178 |
+| `sinofmana_enemy_weaknesses.ips` | 11178 |
 
 ## RAM
 
