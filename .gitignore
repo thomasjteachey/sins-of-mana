@@ -1,16 +1,5 @@
-# ROMs, saves and save states: copyrighted / personal, never commit
-*.sfc
-*.smc
-*.srm
-*.mss
-*.state*
-*.s9x
-
 # Build outputs (rebuilt by tools/build.py) and probe logs, RAM dumps, screenshots
 build/
-
-# Downloaded tools (asar, Mesen 2): fetch them again, see NOTES.md "Base files"
-third_party/
 
 # Python
 __pycache__/
