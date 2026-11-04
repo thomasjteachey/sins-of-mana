@@ -2182,8 +2182,14 @@ LevelPanel:
 ; $FFFF if none is highlighted this frame); else A = 1 if its frame is there but
 ; not the stat names (the game is redrawing the rows), 0 if not even the frame.
 LvFindWindow:
+	LDA.l !Shadow+((6*32+15)*2) ; caster on the left of the screen: the game draws the
+	AND.w #$03FF             ; window 14 columns further right (corners at 15 / 30)
+	CMP.w #$0040
+	BEQ +
 	LDA.w #!Shadow&$FFFF
-	STA $1B
+	BRA ++
++	LDA.w #(!Shadow&$FFFF)+(14*2)
+++	STA $1B
 	LDA.w #!Shadow>>16
 	STA $1D
 	LDX.w #$0000             ; frame corners and the six stat names
