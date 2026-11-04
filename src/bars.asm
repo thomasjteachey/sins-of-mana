@@ -66,10 +66,13 @@
 ;    the battle script ($D0:FB12), which then waits value + 1 ticks on one of
 ;    the game's timers ($C0:C960: records in bank $7F linked from $7F:00C4,
 ;    +$04 wake tick of the clock $7F:00C6, +$06 length). CastStart records that
-;    length; Bars finds the timer (FindCastTimer) and shows length - time left
-;    while the caster's state (record +$00) is $0A. While the field is paused
-;    (ring menu) the game takes its timers off the list and keeps the time left
-;    in +$08 ($C0:CB00, the mod's $40:16C0): the bar stands still with them.
+;    length; CastBar finds the timer (FindCastTimer) and, while the caster's
+;    state (record +$00) is $0A, shows T - time left out of T, T = the largest
+;    time left seen (value + 1 at first), never fewer steps than before. While
+;    the field is paused (ring menu) the game takes its timers off the list and
+;    keeps the time left in +$08 ($C0:CB00, the mod's $40:16C0): the bar stands
+;    still with them. Right after a ring menu the mod pushes the party's cast
+;    waits 16 ticks later ($40:2400): the bar stands still until it catches up.
 ;  * DMA job type must be $01: type $11 makes the NMI send a "done" message to
 ;    whatever task was running, and enemy scripts read it as a command (that
 ;    overwrote the brightness pointer -> black screen).
@@ -91,7 +94,7 @@ FeatLevelInfo = $CBF4FA
 FeatShopInfo  = $CBF4FC
 
 !Ram      = $7E2800
-!CastBook = !Ram+$000        ; 16 entity slots x (wait timer, its length; $FFFF, tick it ran out)
+!CastBook = !Ram+$000        ; 16 entity slots x (wait timer, steps << 12 | bar length; $FFFF, tick it ran out)
 !Counter  = !Ram+$040        ; frames
 !Stamp    = !Ram+$042        ; !Ticks when the ready table was built
 !Ready    = !Ram+$044        ; address (bank $7E) of the table the NMI should use
@@ -309,7 +312,7 @@ Bars:
 	ADC.w #!YGap             ; a cast bar goes under it
 	STA $09
 
-.cast                        ; cast bar: value = ticks since cast start, max = length
+.cast                        ; cast bar (CastBar: whether, and how full)
 	LDX $03
 	LDA.w $0001,X            ; party or enemy cast bar switched off?
 	AND.w #$00FF
@@ -320,70 +323,10 @@ Bars:
 +	LDA.l FeatCastEnemy
 ++	BPL +
 	JMP .nextEntity
-+	LDA.w $0000,X            ; state $0A = casting
-	AND.w #$00FF
-	CMP.w #$000A
-	BEQ +
-	JMP .nextEntity
-+
-	LDA $01
-	ASL
-	TAX                      ; X = slot * 4
-	LDA.l !CastBook+2,X      ; the cast's wait: its length (value + 1)
-	STA $0D
-	LDA.l !CastBook,X        ; its timer record ($7F; 0 = not found yet, $FFFF = ran out)
-	CMP.w #$FFFF
-	BEQ .castReady
-	LDY $0D                  ; (no cast recorded)
-	BNE +
-	JMP .nextEntity
-+	CMP.w #$0000
-	BNE +
-	JSR FindCastTimer
-	BNE +
-	STZ $0B                  ; not in the timer list yet: empty
-	BRA .castFill
-+	TAY
-	LDA.w $0008,Y            ; time left, saved while the field is paused (ring menu)
-	BNE .castLeft
-	LDA.w $0004,Y            ; else wake - clock
-	SEC
-	SBC.l !Ticks
-	BEQ .castOut
-	BMI .castOut
-.castLeft
-	CMP $0D                  ; elapsed = length - left (0 while more is left)
++	JSL CastBar              ; X = record -> carry clear: A = bar code
 	BCC +
-	LDA $0D
-+	EOR.w #$FFFF
-	SEC
-	ADC $0D
-	STA $0B
-	BRA .castFill
-.castOut                     ; ran out: ready until the spell goes off (a few ticks,
-	LDA.w #$FFFF             ; longer if the ring menu opens meanwhile)
-	STA.l !CastBook,X
-	LDA.l !Ticks
-	STA.l !CastBook+2,X
-	BRA .castFull
-.castReady                   ; ($0D = when it ran out) stale after 4 s
-	LDA.l !Ticks
-	SEC
-	SBC $0D
-	CMP.w #240
-	BCC .castFull
 	JMP .nextEntity
-.castFull
-	LDA.w #$0001
-	STA $0D
-	STA $0B
-.castFill
-	JSR FillSteps
-	CMP.w #!Steps
-	BCC +
-	ORA.w #$1000             ; ready: gold (palette 4); filling: blue (palette 0)
-+	ORA.w #!CastFlag
-	STA $13
++	STA $13
 	LDA $05                  ; position already read for its revenge bar?
 	BNE +
 	JSR Position
@@ -1054,53 +997,6 @@ BandBusy:
 	RTS
 .busy
 	SEC
-	RTS
-
-
-; X = slot * 4, $0D = length of the slot's cast wait -> A = its timer record
-; (also stored in the cast book; Z clear), 0 if it isn't in the timer list yet.
-; The match: a timer of that length that started at most 16 ticks ago and no
-; other slot's. DB = $7F. Keeps X.
-FindCastTimer:
-	PHX                      ; [3,S] = slot * 4
-	LDA.l !Ticks
-	PHA                      ; [1,S] = clock
-	LDY.w $00C4              ; timer list
-.walk
-	BEQ .none
-	LDA.w $0006,Y
-	CMP $0D
-	BNE .next
-	LDA.w $0004,Y            ; wake - clock + 16 >= length?
-	SEC
-	SBC $01,S
-	CLC
-	ADC.w #16
-	CMP $0D
-	BCC .next
-	LDX.w #$0000             ; not another slot's timer
--	TYA
-	CMP.l !CastBook,X
-	BEQ .next
-	INX
-	INX
-	INX
-	INX
-	CPX.w #$0040
-	BCC -
-	PLA
-	PLX
-	TYA
-	STA.l !CastBook,X
-	RTS
-.next
-	LDA.w $0000,Y
-	TAY
-	BRA .walk
-.none
-	PLA
-	PLX
-	LDA.w #$0000
 	RTS
 
 
@@ -1826,7 +1722,8 @@ org $56A000
 ; Cast start: X = the mod's computed cast value, [D+$34] = caster's battle
 ; stats (entity record + $90), D = the caster's script thread page.
 ; Records the length of the wait that follows (value + 1 ticks) with no timer
-; yet, then continues to $C40018.
+; yet and no steps shown, then continues to $C40018. (The cast book keeps the
+; length in 12 bits: a wait of 4096 ticks or more, over a minute, gets no bar.)
 CastStart:
 	PHP
 	REP #$30
@@ -1855,7 +1752,10 @@ CastStart:
 	STA.l !CastBook,X
 	LDA $07,S                ; cast value: the script then waits value + 1 ticks
 	INC
-	STA.l !CastBook+2,X
+	CMP.w #$1000
+	BCC +
+	LDA.w #$0000
++	STA.l !CastBook+2,X
 .done
 	PLA
 	PLA
@@ -1953,6 +1853,201 @@ Warnings:
 	STA $01,S
 	BNE .cell
 	PLA
+	RTS
+
+
+; Cast bar of one entity. JSL from Bars for a party member / enemy whose cast
+; bar is switched on: X = entity record, $01 = entity slot * 2, DB = $7F, D =
+; Bars' locals, A/X/Y 16-bit. -> carry clear: A = bar code (steps, !CastFlag,
+; gold once ready); carry set: no cast bar. Uses $0B-$11 (keeps $01-$09).
+; Cast book entry (slot * 4), set up by CastStart:
+;   +0  the cast's wait timer (bank $7F); 0 = not found yet, $FFFF = ran out
+;   +2  bits 0-11 = the bar's length T in ticks, bits 12-15 = steps shown;
+;       after it ran out: the tick it did (0 before CastStart: no cast)
+; T starts as the wait's length (value + 1) and grows to the largest time left
+; seen: right after a ring menu the mod pushes the party's cast waits 16 ticks
+; later ($40:2400), so the time left can go up, even above value + 1. The
+; steps never go down during a cast: after such a push the bar stands still
+; until the time left is back where it was, and it is full exactly when the
+; timer runs out.
+CastBar:
+	LDA.w $0000,X            ; state $0A = casting
+	AND.w #$00FF
+	CMP.w #$000A
+	BNE .none
+	LDA $01
+	ASL
+	TAX                      ; X = slot * 4
+	LDA.l !CastBook+2,X
+	STA $0D
+	LDA.l !CastBook,X        ; its timer record
+	CMP.w #$FFFF
+	BNE .live
+	LDA.l !Ticks             ; ran out ($0D = when): ready until the spell goes
+	SEC                      ; off (a few ticks, longer if the ring menu opens
+	SBC $0D                  ; meanwhile); stale after 4 s
+	CMP.w #240
+	BCS .none
+.full
+	LDA.w #!Steps|!CastFlag|$1000    ; full, gold (palette 4)
+	CLC
+	RTL
+.none
+	SEC
+	RTL
+.live
+	LDY $0D                  ; (no cast recorded)
+	BEQ .none
+	TAY
+	BNE .timer
+	JSR FindCastTimer        ; not in the timer list yet
+	BNE .timer
+	LDA.w #!CastFlag         ; meanwhile: an empty bar
+	CLC
+	RTL
+.timer                       ; Y = its timer record
+	LDA.w $0008,Y            ; time left, kept there while the timer is suspended
+	BEQ +                    ; (ring menu, caster hit)
+	BPL .left
+	BRA .out
++	LDA.w $0004,Y            ; else wake - clock
+	SEC
+	SBC.l !Ticks
+	BEQ .out
+	BMI .out
+.left
+	CMP.w #$1000
+	BCC +
+	LDA.w #$0FFF
++	STA $0B                  ; time left
+	LDA $0D
+	AND.w #$0FFF
+	CMP $0B                  ; T = the largest time left seen
+	BCS +
+	LDA $0B
++	STA $0F
+	SEC
+	SBC $0B                  ; elapsed = T - left
+	ASL
+	STA $11
+	ASL
+	CLC
+	ADC $11
+	ASL
+	STA $11                  ; elapsed * 12
+	LDY.w #$0000             ; steps = elapsed * 12 / T
+	LDA $0F
+.step
+	CMP $11                  ; while T * (steps + 1) <= elapsed * 12
+	BEQ .more
+	BCS .got
+.more
+	INY
+	CLC
+	ADC $0F
+	BRA .step
+.got
+	TYA
+	XBA
+	ASL
+	ASL
+	ASL
+	ASL
+	STA $11                  ; steps << 12
+	LDA $0D
+	AND.w #$F000             ; never fewer than shown before
+	CMP $11
+	BCS +
+	LDA $11
++	ORA $0F
+	STA.l !CastBook+2,X
+	XBA
+	LSR
+	LSR
+	LSR
+	LSR
+	AND.w #!StepMask
+	ORA.w #!CastFlag         ; filling: blue (palette 0)
+	CLC
+	RTL
+.out                         ; ran out: note when, then full
+	LDA.w #$FFFF
+	STA.l !CastBook,X
+	LDA.l !Ticks
+	STA.l !CastBook+2,X
+	BRL .full
+
+; X = slot * 4, $0D = its cast book +2 (the wait's length; no steps yet) ->
+; A = Y = the wait's timer record (also stored in the cast book; Z clear), or
+; A = 0 if it isn't in the timer list yet. The match: a timer of that length
+; that started at most 16 ticks ago and isn't another cast's. A record still in
+; another slot's entry counts as that cast's only while that entity is casting
+; (state $0A); otherwise that entry is stale (cast over, entity gone, the timer
+; freed and reused) and is cleared. DB = $7F. Keeps X.
+FindCastTimer:
+	LDA $0D
+	AND.w #$0FFF
+	STA $0F                  ; the wait's length
+	PHX                      ; [3,S] = slot * 4
+	LDA.l !Ticks
+	PHA                      ; [1,S] = clock
+	LDY.w $00C4              ; timer list
+.walk
+	BEQ .none
+	LDA.w $0006,Y
+	CMP $0F
+	BNE .next
+	LDA.w $0004,Y            ; wake - clock + 16 >= length?
+	SEC
+	SBC $01,S
+	CLC
+	ADC.w #16
+	CMP $0F
+	BCC .next
+	LDX.w #$0000             ; not another cast's
+.slots
+	TYA
+	CMP.l !CastBook,X
+	BNE .other
+	TXA
+	LSR
+	TAX                      ; slot * 2
+	LDA.l !Entities,X
+	BEQ .stale
+	PHX
+	TAX
+	LDA.w $0000,X
+	PLX
+	AND.w #$00FF
+	CMP.w #$000A
+	BEQ .next                ; that one is casting: not this timer
+.stale
+	TXA
+	ASL
+	TAX
+	LDA.w #$0000
+	STA.l !CastBook,X
+	STA.l !CastBook+2,X
+.other
+	INX
+	INX
+	INX
+	INX
+	CPX.w #$0040
+	BCC .slots
+	PLA
+	PLX
+	TYA
+	STA.l !CastBook,X
+	RTS
+.next
+	LDA.w $0000,Y
+	TAY
+	BRA .walk
+.none
+	PLA
+	PLX
+	LDA.w #$0000
 	RTS
 
 

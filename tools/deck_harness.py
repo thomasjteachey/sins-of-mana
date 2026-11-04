@@ -221,8 +221,9 @@ def frame_log():
         obj = rd16(0x10000 + rec + 4)
         x = rd16(0x10000 + obj + 0x83) if obj else 0
         y = rd16(0x10000 + obj + 0x87) if obj else 0
-        ents.append('s%d st%02X hp%d h%d o%04X %d,%d cb%d/%d' % (s, st, hp, hate, obj, x, y,
-                    rd16(0x2800 + s * 4), rd16(0x2802 + s * 4)))
+        cb0, cb1 = rd16(0x2800 + s * 4), rd16(0x2802 + s * 4)   # cast book: timer, steps << 12 | length
+        cb = 'out@%04X' % cb1 if cb0 == 0xFFFF else '%04X:T%d/s%d' % (cb0, cb1 & 0xFFF, cb1 >> 12)
+        ents.append('s%d st%02X hp%d h%d o%04X %d,%d cb%s' % (s, st, hp, hate, obj, x, y, cb))
     bars = []
     for k in range(8):
         own = rd16(0x2848 + k * 2)
