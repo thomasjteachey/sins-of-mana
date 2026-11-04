@@ -131,7 +131,8 @@ FeatWeakness  = $CBF4FE
 !ShopStamp = !Ram+$0F2       ; !Ticks when it was noted
 !PanelVal  = !Ram+$0F4       ; the highlighted stat as the window shows it (with the +1)
 !WeakRec  = !Ram+$0F6        ; target picker up: record whose name it printed (0 = not up)
-!WeakDepth = !Ram+$0F8       ; the menu script's stack ($7F:F260) when it printed it
+!WeakDP   = !Ram+$0F8        ; direct page of the text task that printed it
+!WeakX    = !Ram+$0FC        ; where that text ended (D+$28) once printed ($FFFF: not noted yet)
 !WeakOn   = !Ram+$0FA        ; enemy type + 1 listed under the target bar (0 = none)
 !RowBusy  = !Ram+$0C0        ; byte per BG3 row: nonzero = the game shows text there
 !TableA   = !Ram+$100        ; HDMA tables (<= 100 bytes each)
@@ -3323,14 +3324,19 @@ incsrc "../build/levelinfo.asm"
 ; Enemy weaknesses. While the player picks a target, rows 8-10 under the target bar
 ; list the targeted enemy's weak and resisted elements (texts: tools/make_weakinfo.py).
 ; WeakName runs in the text op that prints a monster's name, which the target bar
-; uses: it notes the picker is up and how deep the menu script is ($7F:F260). While
-; the script stays that deep, the target slot is $7F:F255 (3+ = an enemy, $FF = all).
-WeakName:                    ; X = the monster's record
+; uses for each enemy the cursor lands on: it notes the record and the text task.
+; The first frame after, WeakWhich notes where the bar's text ended (the task's D+$28:
+; a name ends short of the bar's end, the ring's spell line at $1E). The list stays
+; while the bar still ends there (no other text: spell name, "All enemies", an ally)
+; and the ring menu's window is up ($7F:0032 nonzero; it also blinks off for "All
+; enemies"). The menu script's own variables move around between fights, so no use.
+WeakName:                    ; X = the monster's record, D = the text task
 	TXA
 	STA.l !WeakRec
-	LDA.l $7FF260
-	AND.w #$00FF
-	STA.l !WeakDepth
+	TDC
+	STA.l !WeakDP
+	LDA.w #$FFFF
+	STA.l !WeakX
 	LDA.l $7F0090,X          ; the replaced code
 	ASL
 	RTL
@@ -3361,20 +3367,22 @@ WeakPanel:
 WeakWhich:
 	LDA.l !WeakRec
 	BEQ .none
-	LDA.l $7FF260
+	LDA.l $7F0032            ; the ring menu's window HDMA
 	AND.w #$00FF
-	CMP.l !WeakDepth
-	BNE .stop                ; the script left the target picker
-	LDA.l $7FF255
-	AND.w #$00FF
-	CMP.w #$0003
-	BCC .none                ; a party member
-	CMP.w #$0010
-	BCS .none                ; all enemies
-	ASL
+	BEQ .stop                ; gone: the menu closed (or "All enemies" blinks)
+	LDA.l !WeakDP
 	TAX
-	LDA.l !Entities,X
-	BEQ .none
+	LDA.l $7E0028,X          ; where the bar's text ends now
+	CMP.l !WeakX
+	BEQ .show
+	LDA.l !WeakX
+	CMP.w #$FFFF
+	BNE .stop                ; the bar shows some other text
+	LDA.l $7E0028,X          ; the name's line gets printed a frame or two later
+	BEQ .show                ; (0 until then): note where it ends once it is
+	STA.l !WeakX
+.show
+	LDA.l !WeakRec
 	TAX
 	LDA.l $7F0090,X
 	AND.w #$01FF

@@ -328,6 +328,13 @@ def main():
     import make_addrmap                                     # ADDRESSES.md from the patches
     make_addrmap.main()
 
+    # Copies of the patches for the repo (patches/ is committed, build/ isn't).
+    pub = os.path.join(ROOT, 'patches')
+    os.makedirs(pub, exist_ok=True)
+    for p in ALL_PATCHES:
+        shutil.copyfile(os.path.join(OUT, p), os.path.join(pub, p))
+    print(f'copied {len(ALL_PATCHES)} patches to patches/')
+
 
 if __name__ == '__main__':
     main()
