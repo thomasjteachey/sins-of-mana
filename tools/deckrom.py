@@ -14,7 +14,8 @@ rom = bytearray(open(os.path.join(B, 'deck', 'Sins of ManaNORMAL.sfc'), 'rb').re
 for p in ['sinofmana_equip_descriptions.ips', 'no_popup_messages_fixed.ips',
           'sinofmana_revenge_bar.ips', 'sinofmana_enemy_buff_markers.ips', 'sinofmana_party_cast_bar.ips',
           'sinofmana_enemy_cast_bar.ips', 'sinofmana_party_buff_icons.ips', 'sinofmana_levelup_info.ips',
-          'sinofmana_shop_descriptions.ips', 'sinofmana_fast_menus.ips']:
+          'sinofmana_shop_descriptions.ips', 'sinofmana_enemy_weaknesses.ips',
+          'sinofmana_fast_menus.ips']:
     rom, _ = apply_ips(rom, open(os.path.join(B, p), 'rb').read())
 out = os.path.join(B, 'deck', 'Sins of ManaNORMAL Plus.sfc')
 open(out, 'wb').write(bytes(rom))

@@ -30,6 +30,7 @@ BAR_FEATURES = [
     ('FeatHudIcons', 'sinofmana_party_buff_icons.ips'),
     ('FeatLevelInfo', 'sinofmana_levelup_info.ips'),
     ('FeatShopInfo', 'sinofmana_shop_descriptions.ips'),
+    ('FeatWeakness', 'sinofmana_enemy_weaknesses.ips'),
 ]
 ALL_PATCHES = (['sinofmana_equip_descriptions.ips', 'no_popup_messages_fixed.ips', 'sinofmana_fast_menus.ips']
                + [ips for _, ips in BAR_FEATURES])
@@ -272,9 +273,10 @@ def main():
 
     # Bars engine (src/bars.asm): one patch per feature. Each holds the whole engine (the
     # same bytes in all of them) plus its own feature switch, so any mix applies cleanly.
-    import make_bargfx, make_levelinfo
+    import make_bargfx, make_levelinfo, make_weakinfo
     make_bargfx.write(os.path.join(OUT, 'bargfx.asm'))     # bar tiles, included by bars.asm
     make_levelinfo.write(os.path.join(OUT, 'levelinfo.asm'))   # level-up panel texts, too
+    make_weakinfo.write(os.path.join(OUT, 'weakinfo.asm'))     # and the target picker's
     core_path = os.path.join(OUT, 'som_bars_core.sfc')
     shutil.copyfile(base_path, core_path)
     asm(os.path.join(ROOT, 'src', 'bars.asm'), core_path)

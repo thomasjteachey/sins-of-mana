@@ -92,6 +92,7 @@ FeatCastEnemy = $CBF4F6
 FeatHudIcons  = $CBF4F8
 FeatLevelInfo = $CBF4FA
 FeatShopInfo  = $CBF4FC
+FeatWeakness  = $CBF4FE
 
 !Ram      = $7E2800
 !CastBook = !Ram+$000        ; 16 entity slots x (wait timer, steps << 12 | bar length; $FFFF, tick it ran out)
@@ -129,6 +130,9 @@ FeatShopInfo  = $CBF4FC
 !ShopDesc  = !Ram+$0F0       ; description (bank $53) of the last item name printed (main.asm)
 !ShopStamp = !Ram+$0F2       ; !Ticks when it was noted
 !PanelVal  = !Ram+$0F4       ; the highlighted stat as the window shows it (with the +1)
+!WeakRec  = !Ram+$0F6        ; target picker up: record whose name it printed (0 = not up)
+!WeakDepth = !Ram+$0F8       ; the menu script's stack ($7F:F260) when it printed it
+!WeakOn   = !Ram+$0FA        ; enemy type + 1 listed under the target bar (0 = none)
 !RowBusy  = !Ram+$0C0        ; byte per BG3 row: nonzero = the game shows text there
 !TableA   = !Ram+$100        ; HDMA tables (<= 100 bytes each)
 !TableB   = !Ram+$180
@@ -172,6 +176,11 @@ org $C022BC
 	JSL NmiHdma              ; was LDA $0032 : STA $00420C (re-enable HDMA after uploads)
 	NOP
 	NOP
+	NOP
+
+org $C46A79                  ; text op that prints a monster's name (the target bar)
+	assert read4($C46A79) == $7F0090BF && read1($C46A7D) == $0A
+	JSL WeakName              ; was LDA $7F0090,X : ASL
 	NOP
 
 org $C45EF5                  ; end of the HUD flicker step, after it copied this step's colours
@@ -230,6 +239,12 @@ Bars:
 	JSL LevelPanel
 	BCC +
 	JMP .uploads
++	JSL WeakPanel            ; enemy weaknesses under the target bar
+	BCC +                    ; (carry: upload BG3 rows 8-11)
+	LDA.w #8*64
+	JSR QueueHudRows
+	LDA.w #10*64
+	JSR QueueHudRows
 +	LDA.l FeatRevenge        ; no bar feature on (e.g. only the HUD icons): no bars
 	AND.l FeatMarkers
 	AND.l FeatCastParty
@@ -3303,3 +3318,130 @@ LvLastLine:                  ; = EmitLastLine (that one is in bank $CB)
 	RTS
 
 incsrc "../build/levelinfo.asm"
+
+
+; Enemy weaknesses. While the player picks a target, rows 8-10 under the target bar
+; list the targeted enemy's weak and resisted elements (texts: tools/make_weakinfo.py).
+; WeakName runs in the text op that prints a monster's name, which the target bar
+; uses: it notes the picker is up and how deep the menu script is ($7F:F260). While
+; the script stays that deep, the target slot is $7F:F255 (3+ = an enemy, $FF = all).
+WeakName:                    ; X = the monster's record
+	TXA
+	STA.l !WeakRec
+	LDA.l $7FF260
+	AND.w #$00FF
+	STA.l !WeakDepth
+	LDA.l $7F0090,X          ; the replaced code
+	ASL
+	RTL
+
+; Called from Bars every frame (16-bit A/X/Y, DB = $7F). Carry set: rows 8-11 changed.
+WeakPanel:
+	LDA.l FeatWeakness
+	BMI .no
+	JSR WeakWhich
+	CMP.l !WeakOn
+	BNE .draw
+	CMP.w #$0000
+	BEQ .no
+	LDA.l !Counter           ; shown: draw it again every 4 frames (the game's
+	AND.w #$0003             ; target labels may write over it)
+	BNE .no
+	LDA.l !WeakOn
+.draw
+	STA.l !WeakOn
+	JSR WeakDraw
+	SEC
+	RTL
+.no
+	CLC
+	RTL
+
+; A = enemy type + 1 to list, 0 = none.
+WeakWhich:
+	LDA.l !WeakRec
+	BEQ .none
+	LDA.l $7FF260
+	AND.w #$00FF
+	CMP.l !WeakDepth
+	BNE .stop                ; the script left the target picker
+	LDA.l $7FF255
+	AND.w #$00FF
+	CMP.w #$0003
+	BCC .none                ; a party member
+	CMP.w #$0010
+	BCS .none                ; all enemies
+	ASL
+	TAX
+	LDA.l !Entities,X
+	BEQ .none
+	TAX
+	LDA.l $7F0090,X
+	AND.w #$01FF
+	CMP.w #WeakCount
+	BCS .none
+	INC
+	RTS
+.stop
+	LDA.w #$0000
+	STA.l !WeakRec
+.none
+	LDA.w #$0000
+	RTS
+
+; Blank BG3 rows 8-10, then write the text of enemy type A-1 there (A = 0: blank only).
+WeakDraw:
+	PHA
+	LDX.w #8*64
+	LDA.w #$00FF
+-	STA.l !Shadow,X
+	INX
+	INX
+	CPX.w #11*64
+	BNE -
+	PLA
+	BEQ .rts
+	DEC
+	ASL
+	TAX
+	LDA.l WeakPtr,X
+	STA $01
+	LDA.w #WeakPtr>>16
+	STA $03
+	LDA.w #$3000             ; white
+	STA $05
+	LDY.w #$0000
+	LDX.w #(8*64)+2          ; row 8, column 1
+.next
+	LDA [$01],Y
+	INY
+	AND.w #$00FF
+	BEQ .rts                 ; $00 end
+	CMP.w #$0004
+	BCS .tile
+	CMP.w #$0001
+	BNE .pal
+	TXA                      ; $01 next line, column 1
+	AND.w #$FFC0
+	CLC
+	ADC.w #64+2
+	TAX
+	BRA .next
+.pal
+	CMP.w #$0002             ; $02 green (palette 1), $03 white (palette 4)
+	BEQ +
+	LDA.w #$3000
+	BRA ++
++	LDA.w #$2400
+++	STA $05
+	BRA .next
+.tile
+	ORA $05
+	STA.l !Shadow,X
+	INX
+	INX
+	BRA .next
+.rts
+	RTS
+
+incsrc "../build/weakinfo.asm"
