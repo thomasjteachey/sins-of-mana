@@ -56,13 +56,16 @@ def main():
 
     # states saved since the installed ROM went in
     names = ssh("cd '%s' && find . -maxdepth 1 -name '%s' -newer '%s' -printf '%%f\\n'"
-                % (STATES, STATE_GLOB, REMOTE)).split()
+                % (STATES, STATE_GLOB, REMOTE)).splitlines()
+    names = [n for n in names if n.strip()]
     risky = []
     with tempfile.TemporaryDirectory() as tmp:
         for n in names:
             p = os.path.join(tmp, n)
-            open(p, 'wb').write(subprocess.run(SSH + ["cat '%s/%s'" % (STATES, n)], capture_output=True,
-                                               timeout=120).stdout)
+            blob = subprocess.run(SSH + ["cat '%s/%s'" % (STATES, n)], capture_output=True, timeout=120).stdout
+            if len(blob) < 1024:                 # RetroArch's empty .state.auto stub
+                continue
+            open(p, 'wb').write(blob)
             out = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'statecheck.py'), p],
                                  capture_output=True, text=True).stdout.strip()
             print('state', out)
