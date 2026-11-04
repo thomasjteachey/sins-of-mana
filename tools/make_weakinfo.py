@@ -72,8 +72,9 @@ def spell_texts():
         if not v:
             continue
         what = clean(v[col['Effect']])
-        if str(v[col['Special']]).strip():
-            what = what.rstrip('.') + '. ' + clean(v[col['Special']])
+        special = str(v[col['Special']]).strip()
+        if special and not special.lower().startswith('can be learned'):   # it's in the ring: learned
+            what = what.rstrip('.') + '. ' + clean(special)
         lines = [[(l, False)] for l in wrap(what, WIDTH)]
         up = str(v[col['Possible Upgrades']]).strip()
         if up:
