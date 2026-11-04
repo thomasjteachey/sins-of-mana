@@ -325,6 +325,9 @@ def main():
         open(os.path.join(OUT, f'som_desc_{names[n]}.sfc'), 'wb').write(test)
         print(f'also wrote build/som_desc_{names[n]}.sfc')
 
+    import make_addrmap                                     # ADDRESSES.md from the patches
+    make_addrmap.main()
+
 
 if __name__ == '__main__':
     main()
