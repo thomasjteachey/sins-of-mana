@@ -302,6 +302,9 @@ def main():
     open(fast_ips, 'wb').write(make_ips(base, open(fast_path, 'rb').read()))
     print(f'patch {os.path.relpath(fast_ips, ROOT)}')
 
+    # Quick hits (src/quickhits.asm) is not built: it made the controlled character react later
+    # (NOTES.md, "Quick hits"). Snes9x's "Reduce Slowdown" does the job instead.
+
     # Test ROM with everything: descriptions + every bar feature + faster menus.
     test_path = os.path.join(OUT, 'som_test.sfc')
     shutil.copyfile(desc_path, test_path)

@@ -18,6 +18,12 @@ Steps:
                   of entity slot S + OFF (hex), e.g. keeprec:1:C5=880008 (stat changes),
                   keeprec:0:92=0000@8 (HP 0 for 8 frames)
   lum:1           also log every frame's mean brightness (and button presses) to OUTDIR/lum.txt
+  stats:1         count per frame and summarize at the end (log.txt, "STATS"): sprite builder runs (the
+                  bar engine's counter $7E:2840), frames that end in the idle task, frames that end with
+                  the controlled character's task waiting for its turn, and how long hit messages
+                  (type $40) sit unread in a task's queue
+Core options: environment variable HARNESS_OPTS="key=value,key=value" (e.g.
+snes9x_overclock_cycles=max); the options the core offers are logged at the start.
 """
 import ctypes as C, os, struct, sys, zlib
 
@@ -58,8 +64,31 @@ BUTTONS = {'b': 0, 'y': 1, 'select': 2, 'start': 3, 'up': 4, 'down': 5, 'left': 
            'a': 8, 'x': 9, 'l': 10, 'r': 11}
 
 
+OPTS = dict(kv.split('=', 1) for kv in os.environ.get('HARNESS_OPTS', '').split(',') if '=' in kv)
+OPT_VALUES = {k: C.c_char_p(v.encode()) for k, v in OPTS.items()}
+
+
 def env_cb(cmd, data):
     cmd &= 0xFFFF
+    if cmd == 15:                                   # GET_VARIABLE
+        var = C.cast(data, C.POINTER(Variable))[0]
+        key = var.key.decode() if var.key else ''
+        if key in OPT_VALUES:
+            C.cast(data, C.POINTER(Variable))[0].value = OPT_VALUES[key].value
+            return True
+        return False
+    if cmd == 52:                                   # GET_CORE_OPTIONS_VERSION: 0 = use SET_VARIABLES
+        C.cast(data, C.POINTER(C.c_uint))[0] = 0
+        return True
+    if cmd == 16:                                   # SET_VARIABLES: log what the core offers
+        arr = C.cast(data, C.POINTER(Variable))
+        i = 0
+        while arr[i].key:
+            if b'overclock' in arr[i].key or b'slowdown' in (arr[i].value or b'').lower():
+                log('option %s: %s' % (arr[i].key.decode(), (arr[i].value or b'').decode(errors='replace')))
+            i += 1
+        log('options set: %s' % (OPTS or 'defaults'))
+        return True
     if cmd == 10:                                   # SET_PIXEL_FORMAT
         pixfmt[0] = C.cast(data, C.POINTER(C.c_uint))[0]
         return True
@@ -171,6 +200,51 @@ def save(name):
 
 
 fno = 0
+stats_on = False
+ST = {'frames': 0, 'builds': 0, 'idle': 0, 'pwait': 0, 'msgs': {}, 'waits': []}
+last_counter = None
+
+
+def frame_stats():
+    """Per-frame counters for stats:1 (see the usage)."""
+    global last_counter
+    ST['frames'] += 1
+    c = rd16(0x2840)
+    if last_counter is not None:
+        ST['builds'] += (c - last_counter) & 0xFFFF
+    last_counter = c
+    cur = rd16(0x10064)
+    if cur and rd8(0x10004 + cur) == 0x02:             # the idle task (id 2) is running
+        ST['idle'] += 1
+    rec = rd16(0x2040)
+    pid = rd8(0x10002 + rec) if rec else None
+    live = set()
+    for tk in range(0x0C00, 0x0F80, 0x20):
+        t = 0x10000 + tk
+        if not rd8(t + 2):
+            continue
+        if pid is not None and rd8(t + 4) == pid and rd8(t + 2) == 0x02:
+            ST['pwait'] += 1
+        m, n = rd16(t + 0x0C), 0
+        while m and n < 40:
+            if rd8(0x10003 + m) == 0x40:
+                live.add((tk, m))
+                ST['msgs'].setdefault((tk, m), fno)
+            m, n = rd16(0x10000 + m), n + 1
+    for k in [k for k in ST['msgs'] if k not in live]:
+        ST['waits'].append(fno - ST['msgs'].pop(k))
+
+
+def stats_line():
+    w = sorted(ST['waits'])
+    med = w[len(w) // 2] if w else 0
+    p90 = w[int(len(w) * 0.9)] if w else 0
+    return ('STATS frames %d, sprite builds %d (%.1f%% frames without), idle at frame end %d, your task '
+            'waiting %d, hit messages %d unread for avg %.1f med %d p90 %d max %d frames' %
+            (ST['frames'], ST['builds'], 100.0 * max(0, ST['frames'] - ST['builds']) / max(1, ST['frames']),
+             ST['idle'], ST['pwait'], len(w), sum(w) / max(1, len(w)), med, p90, w[-1] if w else 0))
+
+
 every = 0
 castshots = 0
 keephate = {}
@@ -257,6 +331,8 @@ def run_frame():
         pressed = '+'.join(sorted(k for k, v in BUTTONS.items() if v in held)) or '-'
         LUM.write('%d %.1f %s' % (fno, frame_lum(), pressed) + chr(10))
     casting = frame_log()
+    if stats_on:
+        frame_stats()
     if every and fno % every == 0:
         png('f%05d' % fno)
     if castshots and casting and fno % castshots == 0:
@@ -272,6 +348,8 @@ for step in STEPS:
         every = int(step[6:])
     elif step.startswith('castshots:'):
         castshots = int(step[10:])
+    elif step.startswith('stats:'):
+        stats_on = step[6:] == '1'
     elif step.startswith('lum:'):
         lum_on = step[4:] == '1'
         if lum_on and LUM is None:
@@ -298,6 +376,8 @@ for step in STEPS:
         for _ in range(int(n)):
             run_frame()
         held.clear()
+if stats_on:
+    log(stats_line())
 log('done at frame %d' % fno)
 if LUM:
     LUM.close()
