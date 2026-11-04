@@ -4,3 +4,17 @@ build/
 # Python
 __pycache__/
 *.pyc
+
+# Not ours to publish: the game ROM, the emulator, and the Sin of Mana release files
+# (keep local copies here; tools/build.py and the generators read them)
+*.sfc
+*.smc
+third_party/mesen2/
+Seiken Densetsu 3 (J)_sinofmana_2060.ips
+README.txt
+changes_overview.txt
+classes_capstones.txt
+*.xls
+difficulty_changer/
+mechanics/
+misc_patches/
