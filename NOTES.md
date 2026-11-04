@@ -178,6 +178,10 @@ Soak test so far (tournament fight, Duran with poked spells; `tools/spam.py STAT
 - ~200 Fireball + ~80 Magic Shield casts, ring menu opened every cycle: heap 107-110 pages, 12-13 objects, ~55 free DMA jobs at every checkpoint. No growth, no visible glitches. Not reproduced yet.
 - Not covered: fights with many enemies, map changes, enemy spells, summons, Lv2/3 techs, items, level-ups, chests/trap wheel.
 - Mesen's headless runs stop after roughly 1.5-2 minutes of wall time; `spam.py` chains short segments through save states.
+- Map changes and enemy deaths (2026-11-04, Praetarius's guesses: actions cut off by leaving the screen, enemies dying in the wrong part of their AI): `tools/leaktest.py statue SEGMENTS CYCLES [KILL_AT [KILL_STEP]]` with `tests/probe_leak.lua`. State `statue` = the save-statue room north of the ice cave; each cycle walks down into the cave (Petit Poseidons + Dragon Zombie spawn and start attacking / casting), waits 80 frames, walks out mid-action, waits 150 frames, then logs the pools (heap pages, owners, free DMA jobs, sprite objects, timers, entities). Kill mode holds every enemy's HP at 1 from KILL_AT frames after the spawn (10-90, +7 per cycle) so the allies' next hit kills it (writing 0 kills nothing: death is only checked when damage lands; the stats are loaded a few frames after the spawn).
+  - 60 cycles leaving mid-action: settled cycles (4 entities) all at heap 80-81 pages, 8 owners, 10 sprite objects, 8-10 timers, ~55 free DMA jobs.
+  - 63 cycles with 92 kills at varied timing (31 settled samples): heap 80-83, objects 9-10, timers 4-10, free DMA 52-58. No growth. (Samples with 6 entities were taken mid-transition and are left out.)
+  - Not covered yet: the party's own casts cut off by leaving, bosses, summons, techs, and much longer runs.
 
 ## Spells and casting
 
